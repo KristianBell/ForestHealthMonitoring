@@ -108,14 +108,14 @@
 
     function showZoneDetails(feature) {
       const zoneId = feature.properties.site || feature.properties.block;
-      const zoneDetections = detections.filter(d => d.zone === zoneId || d.block === zoneId);
+      const zoneDetections = detections.filter(d => d.site === zoneId || d.block === zoneId);
 
       const nativeSpecies = new Set();
       const nonNativeSpecies = new Set();
       const trends = {};
 
       zoneDetections.forEach(d => {
-        const isNative = d.native?.toLowerCase() === 'yes';
+        const isNative = d.native.toLowerCase() === 'native';
         const key = d.year;
         if (!trends[key]) trends[key] = { native: new Set(), nonnative: new Set() };
 
