@@ -138,15 +138,16 @@
 
       zoneDetections.forEach(d => {
         const isNative = (d.native || '').toLowerCase() === 'native';
+        const label = `${d.common_name || ''} (${d.name})`;
         const year = d.year;
         if (!trends[year]) trends[year] = { native: new Set(), nonnative: new Set() };
 
         if (isNative) {
-          nativeSpecies.add(d.name);
-          trends[year].native.add(d.name);
+          nativeSpecies.add(label);
+          trends[year].native.add(label);
         } else {
-          nonNativeSpecies.add(d.name);
-          trends[year].nonnative.add(d.name);
+          nonNativeSpecies.add(label);
+          trends[year].nonnative.add(label);
         }
       });
 
@@ -170,9 +171,10 @@
       document.getElementById('species-list').innerHTML = '';
     }
 
-    fetch('detections_zoned.json')
-      .then(res => res.json())
-      .then(data => detections = data);
+    const blockFiles = ['detections_block_1.json', 'detections_block_2.json', 'detections_block_3.json', 'detections_block_4.json', 'detections_block_5.json'];
+    Promise.all(blockFiles.map(f => fetch(f).then(res => res.json()))).then(results => {
+      detections = results.flat();
+    });
 
     fetch('nillumbik_boundary.geojson')
       .then(response => response.json())
@@ -215,7 +217,16 @@
             fillOpacity: 0.2
           },
           onEachFeature: function (feature, layer) {
-            layer.on('click', () => showZoneDetails(feature));
+            layer.on('click', () => {
+              L.DomEvent.stopPropagation;
+              showZoneDetails(feature);
+            });
+            layer.on('mouseover', function () {
+              layer.setStyle({ weight: 2, color: 'cyan' });
+            });
+            layer.on('mouseout', function () {
+              layer.setStyle({ weight: 0.5, color: 'blue' });
+            });
           }
         });
         thirtyZoneLayer.addLayer(layer);
