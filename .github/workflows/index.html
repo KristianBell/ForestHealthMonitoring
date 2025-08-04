@@ -18,7 +18,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     // Initialize the map
-    var map = L.map('map').setView([-25.0, 135.0], 4); // Australia default view
+    var map = L.map('map').setView([-37.58, 145.2], 12); // Nillumbik area
 
     // Add OpenStreetMap tiles
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -26,39 +26,21 @@
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // Example GeoJSON feature (replace with real data)
-    var regions = {
-      "type": "FeatureCollection",
-      "features": [
-        {
-          "type": "Feature",
-          "properties": {
-            "name": "Region A",
-            "species": "42 species recorded",
-            "details": "High mammal richness."
+    // Load the real Nillumbik Shire boundary GeoJSON
+    fetch('nillumbik_boundary.geojson')
+      .then(response => response.json())
+      .then(data => {
+        L.geoJSON(data, {
+          style: {
+            color: 'black',
+            weight: 2,
+            fillOpacity: 0.1
           },
-          "geometry": {
-            "type": "Polygon",
-            "coordinates": [[[135.0, -24.0], [136.0, -24.0], [136.0, -25.0], [135.0, -25.0], [135.0, -24.0]]]
+          onEachFeature: function (feature, layer) {
+            layer.bindPopup(`<b>${feature.properties.NAME || 'Nillumbik Shire'}</b>`);
           }
-        }
-      ]
-    };
-
-    function onEachFeature(feature, layer) {
-      if (feature.properties && feature.properties.name) {
-        layer.bindPopup("<b>" + feature.properties.name + "</b><br>" + feature.properties.species + "<br>" + feature.properties.details);
-      }
-    }
-
-    L.geoJSON(regions, {
-      onEachFeature: onEachFeature,
-      style: {
-        color: "#3388ff",
-        weight: 2,
-        fillOpacity: 0.3
-      }
-    }).addTo(map);
+        }).addTo(map);
+      });
   </script>
 </body>
 </html>
