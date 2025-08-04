@@ -106,18 +106,13 @@
       });
     }
 
-    function normalizeSiteId(id) {
-      return id.replace(/-/g, '').toUpperCase();
-    }
-
     function showZoneDetails(feature) {
       const props = feature.properties;
       const isBlock = 'block' in props;
-      const zoneIdRaw = isBlock ? props.block : props.site;
-      const zoneId = isBlock ? String(zoneIdRaw) : normalizeSiteId(String(zoneIdRaw));
+      const zoneId = String(isBlock ? props.block : props.site);
 
       const zoneDetections = detections.filter(d => {
-        return isBlock ? String(d.block) === zoneId : normalizeSiteId(String(d.site)) === zoneId;
+        return isBlock ? String(d.block) === zoneId : String(d.site) === zoneId;
       });
 
       const nativeSpecies = new Set();
@@ -143,7 +138,7 @@
       const trendNonNative = years.map(y => trends[y].nonnative.size);
 
       document.getElementById('zone-details').innerHTML = `
-        <h3>${zoneIdRaw}</h3>
+        <h3>${zoneId}</h3>
         <p><strong>Detections:</strong> ${zoneDetections.length}</p>
         <p><strong>Unique Native Species:</strong> ${nativeSpecies.size}</p>
         <p><strong>Unique Non-native Species:</strong> ${nonNativeSpecies.size}</p>
@@ -174,7 +169,7 @@
     fetch('blocks.geojson')
       .then(response => response.json())
       .then(data => {
-        L.geoJSON(data, {
+        const layer = L.geoJSON(data, {
           style: {
             color: 'darkgreen',
             weight: 1,
@@ -183,13 +178,14 @@
           onEachFeature: function (feature, layer) {
             layer.on('click', () => showZoneDetails(feature));
           }
-        }).addTo(fiveZoneLayer);
+        });
+        fiveZoneLayer.addLayer(layer);
       });
 
     fetch('nillumbik_30zones.geojson')
       .then(response => response.json())
       .then(data => {
-        L.geoJSON(data, {
+        const layer = L.geoJSON(data, {
           style: {
             color: 'blue',
             weight: 0.5,
@@ -198,7 +194,8 @@
           onEachFeature: function (feature, layer) {
             layer.on('click', () => showZoneDetails(feature));
           }
-        }).addTo(thirtyZoneLayer);
+        });
+        thirtyZoneLayer.addLayer(layer);
       });
 
     var overlayMaps = {
