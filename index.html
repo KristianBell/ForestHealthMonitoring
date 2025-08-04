@@ -5,28 +5,122 @@
   <title>Biodiversity Map</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+    }
     #map {
       height: 100vh;
-      width: 100%;
+      width: 75%;
+    }
+    #sidebar {
+      width: 25%;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 10px;
+      box-sizing: border-box;
+      border-left: 1px solid #ccc;
+      font-family: sans-serif;
+    }
+    h2 {
+      margin-top: 0;
+    }
+    canvas {
+      width: 100% !important;
+      height: auto !important;
     }
   </style>
 </head>
 <body>
   <div id="map"></div>
+  <div id="sidebar">
+    <h2>Zone Info</h2>
+    <div id="zone-details">Click a zone to see details</div>
+    <canvas id="barChart"></canvas>
+    <canvas id="lineChart"></canvas>
+  </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // Initialize the map
-    var map = L.map('map').setView([-37.58, 145.2], 12); // Nillumbik area
+    var map = L.map('map').setView([-37.58, 145.2], 12);
 
-    // Add OpenStreetMap tiles
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 18,
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // Load the real Nillumbik Shire boundary GeoJSON
+    var nillumbikBoundaryLayer = L.layerGroup();
+    var fiveZoneLayer = L.layerGroup();
+    var thirtyZoneLayer = L.layerGroup();
+
+    let barChart, lineChart;
+
+    function updateCharts(native, nonnative, trendNative, trendNonNative, years) {
+      if (barChart) barChart.destroy();
+      if (lineChart) lineChart.destroy();
+
+      const ctxBar = document.getElementById('barChart').getContext('2d');
+      barChart = new Chart(ctxBar, {
+        type: 'bar',
+        data: {
+          labels: ['Native', 'Non-native'],
+          datasets: [{
+            label: 'Species Richness',
+            data: [native, nonnative],
+            backgroundColor: ['green', 'red']
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { display: false } }
+        }
+      });
+
+      const ctxLine = document.getElementById('lineChart').getContext('2d');
+      lineChart = new Chart(ctxLine, {
+        type: 'line',
+        data: {
+          labels: years,
+          datasets: [
+            {
+              label: 'Native Richness',
+              data: trendNative,
+              borderColor: 'green',
+              fill: false
+            },
+            {
+              label: 'Non-native Richness',
+              data: trendNonNative,
+              borderColor: 'red',
+              fill: false
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'top' } }
+        }
+      });
+    }
+
+    function showZoneDetails(feature) {
+      document.getElementById('zone-details').innerHTML = `
+        <h3>${feature.properties.zone || 'Zone'}</h3>
+        <p><strong>Notes:</strong> ${feature.properties.notes || 'None'}</p>
+      `;
+
+      updateCharts(
+        feature.properties.richness || 0,
+        feature.properties.nonnative || 0,
+        feature.properties.trend_native || [],
+        feature.properties.trend_nonnative || [],
+        feature.properties.trend_years || []
+      );
+    }
+
     fetch('nillumbik_boundary.geojson')
       .then(response => response.json())
       .then(data => {
@@ -39,8 +133,50 @@
           onEachFeature: function (feature, layer) {
             layer.bindPopup(`<b>${feature.properties.NAME || 'Nillumbik Shire'}</b>`);
           }
-        }).addTo(map);
+        }).addTo(nillumbikBoundaryLayer);
       });
+
+    fetch('blocks.geojson')
+      .then(response => response.json())
+      .then(data => {
+        L.geoJSON(data, {
+          style: {
+            color: 'darkgreen',
+            weight: 1,
+            fillOpacity: 0.3
+          },
+          onEachFeature: function (feature, layer) {
+            layer.on('click', () => showZoneDetails(feature));
+          }
+        }).addTo(fiveZoneLayer);
+      });
+
+    fetch('nillumbik_30zones.geojson')
+      .then(response => response.json())
+      .then(data => {
+        L.geoJSON(data, {
+          style: {
+            color: 'blue',
+            weight: 0.5,
+            fillOpacity: 0.2
+          },
+          onEachFeature: function (feature, layer) {
+            layer.on('click', () => showZoneDetails(feature));
+          }
+        }).addTo(thirtyZoneLayer);
+      });
+
+    var overlayMaps = {
+      "Nillumbik Boundary": nillumbikBoundaryLayer,
+      "5 Zones": fiveZoneLayer,
+      "30 Zones": thirtyZoneLayer
+    };
+
+    L.control.layers(null, overlayMaps).addTo(map);
+
+    nillumbikBoundaryLayer.addTo(map);
+    fiveZoneLayer.addTo(map);
+    thirtyZoneLayer.addTo(map);
   </script>
 </body>
 </html>
