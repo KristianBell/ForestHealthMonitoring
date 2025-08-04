@@ -41,6 +41,7 @@
     <div id="zone-details">Click a zone to see details</div>
     <canvas id="barChart"></canvas>
     <canvas id="lineChart"></canvas>
+    <div id="species-list"></div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -56,7 +57,18 @@
     var fiveZoneLayer = L.layerGroup();
     var thirtyZoneLayer = L.layerGroup();
 
-    let barChart, lineChart, detections = [];
+    let barChart, lineChart, detections = [], latestSpeciesData = {};
+
+    function updateSpeciesList(group) {
+      const speciesSet = latestSpeciesData[group];
+      if (!speciesSet) return;
+
+      const listHTML = [...speciesSet].sort().map(s => `<li>${s}</li>`).join('');
+      document.getElementById('species-list').innerHTML = `
+        <h4>${group === 'native' ? 'Native' : 'Non-native'} Species List</h4>
+        <ul>${listHTML}</ul>
+      `;
+    }
 
     function updateCharts(native, nonnative, trendNative, trendNonNative, years) {
       if (barChart) barChart.destroy();
@@ -75,7 +87,12 @@
         },
         options: {
           responsive: true,
-          plugins: { legend: { display: false } }
+          plugins: { legend: { display: false } },
+          onClick: (e, elements) => {
+            if (!elements.length) return;
+            const idx = elements[0].index;
+            updateSpeciesList(idx === 0 ? 'native' : 'nonnative');
+          }
         }
       });
 
@@ -133,6 +150,11 @@
         }
       });
 
+      latestSpeciesData = {
+        native: nativeSpecies,
+        nonnative: nonNativeSpecies
+      };
+
       const years = Object.keys(trends).sort();
       const trendNative = years.map(y => trends[y].native.size);
       const trendNonNative = years.map(y => trends[y].nonnative.size);
@@ -145,6 +167,7 @@
       `;
 
       updateCharts(nativeSpecies.size, nonNativeSpecies.size, trendNative, trendNonNative, years);
+      document.getElementById('species-list').innerHTML = '';
     }
 
     fetch('detections_zoned.json')
