@@ -58,10 +58,23 @@
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
+    let barChart, lineChart, detections = [], latestSpeciesData = {};
+
+    const boundaryStyle = {
+      color: 'black',
+      weight: 2,
+      fillOpacity: 0,
+      interactive: false
+    };
+
+    fetch('nillumbik_boundary.geojson')
+      .then(res => res.json())
+      .then(data => {
+        L.geoJSON(data, { style: boundaryStyle }).addTo(map);
+      });
+
     var fiveZoneLayer = L.layerGroup();
     var thirtyZoneLayer = L.layerGroup();
-
-    let barChart, lineChart, detections = [], latestSpeciesData = {};
 
     function updateSpeciesList(group) {
       const speciesSet = latestSpeciesData[group];
@@ -127,9 +140,8 @@
       });
     }
 
-    function showZoneDetails(feature) {
+    function showZoneDetails(feature, isBlock = false) {
       const props = feature.properties;
-      const isBlock = fiveZoneLayer.hasLayer(feature.layer);
       const zoneId = String(isBlock ? props.block : props.site);
 
       const zoneDetections = detections.filter(d => {
@@ -180,21 +192,23 @@
       detections = results.flat();
     });
 
-    let fiveLayerInstance;
     fetch('blocks.geojson')
       .then(response => response.json())
       .then(data => {
-        fiveLayerInstance = L.geoJSON(data, {
+        const fiveLayerInstance = L.geoJSON(data, {
           style: {
             color: 'darkgreen',
             weight: 1,
             fillOpacity: 0.3
           },
           onEachFeature: function (feature, layer) {
-            feature.layer = layer;
-            layer.on('click', e => {
-              if (map.hasLayer(fiveZoneLayer)) {
-                showZoneDetails(feature);
+            layer.on({
+              mouseover: () => layer.setStyle({ weight: 2, color: 'lime' }),
+              mouseout: () => layer.setStyle({ weight: 1, color: 'darkgreen' }),
+              click: () => {
+                if (map.hasLayer(fiveZoneLayer)) {
+                  showZoneDetails(feature, true);
+                }
               }
             });
           }
@@ -202,35 +216,31 @@
         fiveZoneLayer.addLayer(fiveLayerInstance);
       });
 
-    let thirtyLayerInstance;
     fetch('nillumbik_30zones.geojson')
       .then(response => response.json())
       .then(data => {
-        thirtyLayerInstance = L.geoJSON(data, {
+        const thirtyLayerInstance = L.geoJSON(data, {
           style: {
             color: 'blue',
             weight: 0.5,
             fillOpacity: 0.2
           },
           onEachFeature: function (feature, layer) {
-            feature.layer = layer;
-            layer.on('click', e => {
-              if (!map.hasLayer(fiveZoneLayer)) {
-                showZoneDetails(feature);
+            layer.on({
+              mouseover: () => layer.setStyle({ weight: 2, color: 'cyan' }),
+              mouseout: () => layer.setStyle({ weight: 0.5, color: 'blue' }),
+              click: () => {
+                if (!map.hasLayer(fiveZoneLayer)) {
+                  showZoneDetails(feature);
+                }
               }
-            });
-            layer.on('mouseover', function () {
-              layer.setStyle({ weight: 2, color: 'cyan' });
-            });
-            layer.on('mouseout', function () {
-              layer.setStyle({ weight: 0.5, color: 'blue' });
             });
           }
         });
         thirtyZoneLayer.addLayer(thirtyLayerInstance);
       });
 
-    var overlayMaps = {
+    const overlayMaps = {
       "5 Zones": fiveZoneLayer,
       "30 Zones": thirtyZoneLayer
     };
