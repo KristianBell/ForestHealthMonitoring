@@ -125,7 +125,7 @@
 
     function showZoneDetails(feature) {
       const props = feature.properties;
-      const isBlock = 'block' in props;
+      const isBlock = fiveZoneLayer.hasLayer(feature.layer);
       const zoneId = String(isBlock ? props.block : props.site);
 
       const zoneDetections = detections.filter(d => {
@@ -191,35 +191,44 @@
         }).addTo(nillumbikBoundaryLayer);
       });
 
+    let fiveLayerInstance;
     fetch('blocks.geojson')
       .then(response => response.json())
       .then(data => {
-        const layer = L.geoJSON(data, {
+        fiveLayerInstance = L.geoJSON(data, {
           style: {
             color: 'darkgreen',
             weight: 1,
             fillOpacity: 0.3
           },
           onEachFeature: function (feature, layer) {
-            layer.on('click', () => showZoneDetails(feature));
+            feature.layer = layer;
+            layer.on('click', e => {
+              if (map.hasLayer(fiveZoneLayer)) {
+                showZoneDetails(feature);
+              }
+            });
           }
         });
-        fiveZoneLayer.addLayer(layer);
+        fiveZoneLayer.addLayer(fiveLayerInstance);
       });
 
+    let thirtyLayerInstance;
     fetch('nillumbik_30zones.geojson')
       .then(response => response.json())
       .then(data => {
-        const layer = L.geoJSON(data, {
+        thirtyLayerInstance = L.geoJSON(data, {
           style: {
             color: 'blue',
             weight: 0.5,
             fillOpacity: 0.2
           },
           onEachFeature: function (feature, layer) {
-            layer.on('click', () => {
-              L.DomEvent.stopPropagation;
-              showZoneDetails(feature);
+            feature.layer = layer;
+            layer.on('click', e => {
+              if (!map.hasLayer(fiveZoneLayer)) {
+                showZoneDetails(feature);
+              }
             });
             layer.on('mouseover', function () {
               layer.setStyle({ weight: 2, color: 'cyan' });
@@ -229,7 +238,7 @@
             });
           }
         });
-        thirtyZoneLayer.addLayer(layer);
+        thirtyZoneLayer.addLayer(thirtyLayerInstance);
       });
 
     var overlayMaps = {
