@@ -56,7 +56,7 @@
     var fiveZoneLayer = L.layerGroup();
     var thirtyZoneLayer = L.layerGroup();
 
-    let barChart, lineChart;
+    let barChart, lineChart, detections = [];
 
     function updateCharts(native, nonnative, trendNative, trendNonNative, years) {
       if (barChart) barChart.destroy();
@@ -107,19 +107,44 @@
     }
 
     function showZoneDetails(feature) {
+      const zoneId = feature.properties.zone || feature.properties.block;
+      const zoneDetections = detections.filter(d => d.zone === zoneId || d.block === zoneId);
+
+      const nativeSpecies = new Set();
+      const nonNativeSpecies = new Set();
+      const trends = {};
+
+      zoneDetections.forEach(d => {
+        const isNative = d.native?.toLowerCase() === 'yes';
+        const key = d.year;
+        if (!trends[key]) trends[key] = { native: new Set(), nonnative: new Set() };
+
+        if (isNative) {
+          nativeSpecies.add(d.name);
+          trends[key].native.add(d.name);
+        } else {
+          nonNativeSpecies.add(d.name);
+          trends[key].nonnative.add(d.name);
+        }
+      });
+
+      const years = Object.keys(trends).sort();
+      const trendNative = years.map(y => trends[y].native.size);
+      const trendNonNative = years.map(y => trends[y].nonnative.size);
+
       document.getElementById('zone-details').innerHTML = `
-        <h3>${feature.properties.zone || 'Zone'}</h3>
-        <p><strong>Notes:</strong> ${feature.properties.notes || 'None'}</p>
+        <h3>${zoneId}</h3>
+        <p><strong>Detections:</strong> ${zoneDetections.length}</p>
+        <p><strong>Unique Native Species:</strong> ${nativeSpecies.size}</p>
+        <p><strong>Unique Non-native Species:</strong> ${nonNativeSpecies.size}</p>
       `;
 
-      updateCharts(
-        feature.properties.richness || 0,
-        feature.properties.nonnative || 0,
-        feature.properties.trend_native || [],
-        feature.properties.trend_nonnative || [],
-        feature.properties.trend_years || []
-      );
+      updateCharts(nativeSpecies.size, nonNativeSpecies.size, trendNative, trendNonNative, years);
     }
+
+    fetch('detections_zoned.json')
+      .then(res => res.json())
+      .then(data => detections = data);
 
     fetch('nillumbik_boundary.geojson')
       .then(response => response.json())
