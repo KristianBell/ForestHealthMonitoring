@@ -32,6 +32,11 @@
       width: 100% !important;
       height: auto !important;
     }
+    .leaflet-control-layers-expanded {
+      width: auto !important;
+      max-height: none !important;
+      display: block !important;
+    }
   </style>
 </head>
 <body>
@@ -53,7 +58,6 @@
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    var nillumbikBoundaryLayer = L.layerGroup();
     var fiveZoneLayer = L.layerGroup();
     var thirtyZoneLayer = L.layerGroup();
 
@@ -176,21 +180,6 @@
       detections = results.flat();
     });
 
-    fetch('nillumbik_boundary.geojson')
-      .then(response => response.json())
-      .then(data => {
-        L.geoJSON(data, {
-          style: {
-            color: 'black',
-            weight: 2,
-            fillOpacity: 0.1
-          },
-          onEachFeature: function (feature, layer) {
-            layer.bindPopup(`<b>${feature.properties.NAME || 'Nillumbik Shire'}</b>`);
-          }
-        }).addTo(nillumbikBoundaryLayer);
-      });
-
     let fiveLayerInstance;
     fetch('blocks.geojson')
       .then(response => response.json())
@@ -242,14 +231,12 @@
       });
 
     var overlayMaps = {
-      "Nillumbik Boundary": nillumbikBoundaryLayer,
       "5 Zones": fiveZoneLayer,
       "30 Zones": thirtyZoneLayer
     };
 
-    L.control.layers(null, overlayMaps).addTo(map);
+    L.control.layers(null, overlayMaps, { collapsed: false }).addTo(map);
 
-    nillumbikBoundaryLayer.addTo(map);
     fiveZoneLayer.addTo(map);
     thirtyZoneLayer.addTo(map);
   </script>
