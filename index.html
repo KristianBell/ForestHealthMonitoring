@@ -37,7 +37,7 @@
 <body>
   <div id="map"></div>
   <div id="sidebar">
-    <h2>Zone Info</h2>
+    <h2>Site Info</h2>
     <div id="zone-details">Click a zone to see details</div>
     <canvas id="barChart"></canvas>
     <canvas id="lineChart"></canvas>
@@ -111,12 +111,13 @@
     }
 
     function showZoneDetails(feature) {
-      const isBlock = feature.properties.hasOwnProperty('block');
-      const zoneIdRaw = isBlock ? feature.properties.block : feature.properties.site;
-      const zoneId = isBlock ? zoneIdRaw : normalizeSiteId(zoneIdRaw);
+      const props = feature.properties;
+      const isBlock = 'block' in props;
+      const zoneIdRaw = isBlock ? props.block : props.site;
+      const zoneId = isBlock ? String(zoneIdRaw) : normalizeSiteId(String(zoneIdRaw));
 
       const zoneDetections = detections.filter(d => {
-        return isBlock ? d.block === zoneId : normalizeSiteId(d.site) === zoneId;
+        return isBlock ? String(d.block) === zoneId : normalizeSiteId(String(d.site)) === zoneId;
       });
 
       const nativeSpecies = new Set();
@@ -124,16 +125,16 @@
       const trends = {};
 
       zoneDetections.forEach(d => {
-        const isNative = d.native.toLowerCase() === 'native';
-        const key = d.year;
-        if (!trends[key]) trends[key] = { native: new Set(), nonnative: new Set() };
+        const isNative = (d.native || '').toLowerCase() === 'native';
+        const year = d.year;
+        if (!trends[year]) trends[year] = { native: new Set(), nonnative: new Set() };
 
         if (isNative) {
           nativeSpecies.add(d.name);
-          trends[key].native.add(d.name);
+          trends[year].native.add(d.name);
         } else {
           nonNativeSpecies.add(d.name);
-          trends[key].nonnative.add(d.name);
+          trends[year].nonnative.add(d.name);
         }
       });
 
