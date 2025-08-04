@@ -107,7 +107,7 @@
     }
 
     function showZoneDetails(feature) {
-      const zoneId = feature.properties.zone || feature.properties.block;
+      const zoneId = feature.properties.site || feature.properties.block;
       const zoneDetections = detections.filter(d => d.zone === zoneId || d.block === zoneId);
 
       const nativeSpecies = new Set();
