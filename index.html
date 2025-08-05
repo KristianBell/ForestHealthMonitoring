@@ -37,16 +37,28 @@
       max-height: none !important;
       display: block !important;
     }
+    #taxa-filter {
+      width: 100%;
+      margin-bottom: 10px;
+    }
+    #download-btn {
+      margin-top: 10px;
+      width: 100%;
+    }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <div id="sidebar">
     <h2>Site Info</h2>
+    <select id="taxa-filter">
+      <option value="all">All Taxa</option>
+    </select>
     <div id="zone-details">Click a zone to see details</div>
     <canvas id="barChart"></canvas>
     <canvas id="lineChart"></canvas>
     <div id="species-list"></div>
+    <button id="download-btn">Download Filtered Data</button>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -58,7 +70,7 @@
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    let barChart, lineChart, detections = [], latestSpeciesData = {};
+    let barChart, lineChart, detections = [], latestSpeciesData = {}, filteredDetections = [], selectedZoneId = null, selectedIsBlock = false;
 
     const boundaryStyle = {
       color: 'black',
@@ -119,40 +131,36 @@
         data: {
           labels: years,
           datasets: [
-            {
-              label: 'Native Richness',
-              data: trendNative,
-              borderColor: 'green',
-              fill: false
-            },
-            {
-              label: 'Non-native Richness',
-              data: trendNonNative,
-              borderColor: 'red',
-              fill: false
-            }
+            { label: 'Native Richness', data: trendNative, borderColor: 'green', fill: false },
+            { label: 'Non-native Richness', data: trendNonNative, borderColor: 'red', fill: false }
           ]
         },
-        options: {
-          responsive: true,
-          plugins: { legend: { position: 'top' } }
-        }
+        options: { responsive: true, plugins: { legend: { position: 'top' } } }
       });
     }
 
     function showZoneDetails(feature, isBlock = false) {
       const props = feature.properties;
       const zoneId = String(isBlock ? props.block : props.site);
+      selectedZoneId = zoneId;
+      selectedIsBlock = isBlock;
+      filterDetectionsByTaxa();
+    }
 
-      const zoneDetections = detections.filter(d => {
-        return isBlock ? String(d.block) === zoneId : String(d.site) === zoneId;
+    function filterDetectionsByTaxa() {
+      const selectedTaxa = document.getElementById('taxa-filter').value;
+
+      filteredDetections = detections.filter(d => {
+        const matchZone = selectedIsBlock ? String(d.block) === selectedZoneId : String(d.site) === selectedZoneId;
+        const matchTaxa = selectedTaxa === 'all' || d.taxa === selectedTaxa;
+        return matchZone && matchTaxa;
       });
 
       const nativeSpecies = new Set();
       const nonNativeSpecies = new Set();
       const trends = {};
 
-      zoneDetections.forEach(d => {
+      filteredDetections.forEach(d => {
         const isNative = (d.native || '').toLowerCase() === 'native';
         const label = `${d.common_name || ''} (${d.name})`;
         const year = d.year;
@@ -167,18 +175,15 @@
         }
       });
 
-      latestSpeciesData = {
-        native: nativeSpecies,
-        nonnative: nonNativeSpecies
-      };
+      latestSpeciesData = { native: nativeSpecies, nonnative: nonNativeSpecies };
 
       const years = Object.keys(trends).sort();
       const trendNative = years.map(y => trends[y].native.size);
       const trendNonNative = years.map(y => trends[y].nonnative.size);
 
       document.getElementById('zone-details').innerHTML = `
-        <h3>${zoneId}</h3>
-        <p><strong>Detections:</strong> ${zoneDetections.length}</p>
+        <h3>${selectedZoneId}</h3>
+        <p><strong>Filtered Detections:</strong> ${filteredDetections.length}</p>
         <p><strong>Unique Native Species:</strong> ${nativeSpecies.size}</p>
         <p><strong>Unique Non-native Species:</strong> ${nonNativeSpecies.size}</p>
       `;
@@ -190,26 +195,40 @@
     const blockFiles = ['detections_block_1.json', 'detections_block_2.json', 'detections_block_3.json', 'detections_block_4.json', 'detections_block_5.json'];
     Promise.all(blockFiles.map(f => fetch(f).then(res => res.json()))).then(results => {
       detections = results.flat();
+      const taxaSet = new Set(detections.map(d => d.taxa).filter(Boolean));
+      const taxaFilter = document.getElementById('taxa-filter');
+      taxaSet.forEach(t => {
+        const option = document.createElement('option');
+        option.value = t;
+        option.textContent = t;
+        taxaFilter.appendChild(option);
+      });
+      taxaFilter.addEventListener('change', filterDetectionsByTaxa);
+    });
+
+    document.getElementById('download-btn').addEventListener('click', () => {
+      if (!filteredDetections.length) return;
+      const csvHeader = Object.keys(filteredDetections[0]).join(',');
+      const csvRows = filteredDetections.map(obj => Object.values(obj).join(','));
+      const blob = new Blob([csvHeader + '\n' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selectedZoneId}_filtered_data.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
     });
 
     fetch('blocks.geojson')
       .then(response => response.json())
       .then(data => {
         const fiveLayerInstance = L.geoJSON(data, {
-          style: {
-            color: 'darkgreen',
-            weight: 1,
-            fillOpacity: 0.3
-          },
+          style: { color: 'darkgreen', weight: 1, fillOpacity: 0.3 },
           onEachFeature: function (feature, layer) {
             layer.on({
               mouseover: () => layer.setStyle({ weight: 2, color: 'lime' }),
               mouseout: () => layer.setStyle({ weight: 1, color: 'darkgreen' }),
-              click: () => {
-                if (map.hasLayer(fiveZoneLayer)) {
-                  showZoneDetails(feature, true);
-                }
-              }
+              click: () => { if (map.hasLayer(fiveZoneLayer)) showZoneDetails(feature, true); }
             });
           }
         });
@@ -220,20 +239,12 @@
       .then(response => response.json())
       .then(data => {
         const thirtyLayerInstance = L.geoJSON(data, {
-          style: {
-            color: 'blue',
-            weight: 0.5,
-            fillOpacity: 0.2
-          },
+          style: { color: 'blue', weight: 0.5, fillOpacity: 0.2 },
           onEachFeature: function (feature, layer) {
             layer.on({
               mouseover: () => layer.setStyle({ weight: 2, color: 'cyan' }),
               mouseout: () => layer.setStyle({ weight: 0.5, color: 'blue' }),
-              click: () => {
-                if (!map.hasLayer(fiveZoneLayer)) {
-                  showZoneDetails(feature);
-                }
-              }
+              click: () => { if (!map.hasLayer(fiveZoneLayer)) showZoneDetails(feature); }
             });
           }
         });
@@ -244,9 +255,7 @@
       "5 Zones": fiveZoneLayer,
       "30 Zones": thirtyZoneLayer
     };
-
     L.control.layers(null, overlayMaps, { collapsed: false }).addTo(map);
-
     fiveZoneLayer.addTo(map);
     thirtyZoneLayer.addTo(map);
   </script>
