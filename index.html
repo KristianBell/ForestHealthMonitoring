@@ -9,10 +9,7 @@
   <style>
     body { margin: 0; padding: 0; display: flex; }
     #map { height: 100vh; width: 75%; }
-    #sidebar {
-      width: 25%; height: 100vh; overflow-y: auto; padding: 10px; box-sizing: border-box;
-      border-left: 1px solid #ccc; font-family: sans-serif;
-    }
+    #sidebar { width: 25%; height: 100vh; overflow-y: auto; padding: 10px; box-sizing: border-box; border-left: 1px solid #ccc; font-family: sans-serif; }
     h2 { margin-top: 0; }
     canvas { width: 100% !important; height: auto !important; }
     .leaflet-control-layers-expanded { width: auto !important; max-height: none !important; display: block !important; }
@@ -47,12 +44,11 @@
     let selectedZoneId = null, selectedIsBlock = false, selectedLayer = null;
 
     const boundaryStyle = { color: 'black', weight: 2, fillOpacity: 0, interactive: false };
-
     fetch('nillumbik_boundary.geojson')
       .then(res => res.json())
       .then(data => { L.geoJSON(data, { style: boundaryStyle }).addTo(map); });
 
-    // Layers (overlays)
+    // Layer containers
     var fiveZoneLayer = L.layerGroup();
     var thirtyZoneLayer = L.layerGroup();
 
@@ -67,29 +63,16 @@
     function getHoverStyle(layer) { return layer._isBlock ? style5Hover : style30Hover; }
 
     function clearSelection() {
-      if (selectedLayer) {
-        selectedLayer.setStyle(getBaseStyle(selectedLayer));
-        selectedLayer = null;
-      }
+      if (selectedLayer) selectedLayer.setStyle(getBaseStyle(selectedLayer));
+      selectedLayer = null;
       selectedZoneId = null;
       selectedIsBlock = false;
+      // Clear sidebar and charts
+      document.getElementById('zone-details').innerHTML = 'Click a zone to see details';
+      if (barChart) barChart.destroy();
+      if (lineChart) lineChart.destroy();
+      document.getElementById('species-list').innerHTML = '';
     }
-
-    // If an overlay is toggled off, clear selection if it was from that overlay
-    map.on('overlayremove', (e) => {
-      if (!selectedLayer) return;
-      const wasFive = selectedLayer._isBlock;
-      const removedFive = e.name === '5 Zones';
-      const removedThirty = e.name === '30 Zones';
-      if ((wasFive && removedFive) || (!wasFive && removedThirty)) {
-        clearSelection();
-        // Optional: clear sidebar readout
-        document.getElementById('zone-details').innerHTML = 'Click a zone to see details';
-        if (barChart) barChart.destroy();
-        if (lineChart) lineChart.destroy();
-        document.getElementById('species-list').innerHTML = '';
-      }
-    });
 
     function updateSpeciesList(group) {
       const speciesSet = latestSpeciesData[group];
@@ -212,42 +195,26 @@
       URL.revokeObjectURL(url);
     });
 
-    // Helper to attach interactive behaviour with persistent selection
     function attachFeatureHandlers(feature, layer, isBlock) {
-      layer._isBlock = isBlock; // tag layer for style logic
+      layer._isBlock = isBlock;
 
       layer.on('mouseover', () => {
-        if (selectedLayer && layer === selectedLayer) return; // keep selected style
+        if (selectedLayer && layer === selectedLayer) return;
         layer.setStyle(getHoverStyle(layer));
       });
 
       layer.on('mouseout', () => {
-        if (selectedLayer && layer === selectedLayer) return; // keep selected style
+        if (selectedLayer && layer === selectedLayer) return;
         layer.setStyle(getBaseStyle(layer));
       });
 
       layer.on('click', () => {
-        // Toggle if clicking the same feature again
-        const thisId = String(isBlock ? feature.properties.block : feature.properties.site);
         const sameAsSelected = selectedLayer && layer === selectedLayer;
+        if (sameAsSelected) { clearSelection(); return; }
 
-        if (sameAsSelected) {
-          // Deselect
-          clearSelection();
-          document.getElementById('zone-details').innerHTML = 'Click a zone to see details';
-          if (barChart) barChart.destroy();
-          if (lineChart) lineChart.destroy();
-          document.getElementById('species-list').innerHTML = '';
-          return;
-        }
-
-        // Selecting a new feature: reset previous, set new, style, and show details
         if (selectedLayer) selectedLayer.setStyle(getBaseStyle(selectedLayer));
         selectedLayer = layer;
         layer.setStyle(styleSelected);
-
-        // Decide which zone set is active to interpret props
-        // (still pass the explicit boolean so counts filter correctly)
         showZoneDetails(feature, isBlock);
       });
     }
@@ -261,6 +228,8 @@
           onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, true)
         });
         fiveZoneLayer.addLayer(fiveLayerInstance);
+        // Pre-select 5-zone layer only
+        fiveZoneLayer.addTo(map);
       });
 
     // 30-zone polygons
@@ -272,15 +241,23 @@
           onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, false)
         });
         thirtyZoneLayer.addLayer(thirtyLayerInstance);
+        // Do NOT add to map on load (keeps only 5-zone active)
       });
 
-    const overlayMaps = {
+    // Put the zone layers in BASE LAYERS to make them exclusive (radio buttons)
+    const baseMaps = {
       "5 Zones": fiveZoneLayer,
       "30 Zones": thirtyZoneLayer
     };
-    L.control.layers(null, overlayMaps, { collapsed: false }).addTo(map);
-    fiveZoneLayer.addTo(map);
-    thirtyZoneLayer.addTo(map);
+    L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
+
+    // When switching base layer, clear selection if it came from the other set
+    map.on('baselayerchange', (e) => {
+      const newIsBlock = (e.layer === fiveZoneLayer);
+      if (selectedLayer && selectedLayer._isBlock !== newIsBlock) {
+        clearSelection();
+      }
+    });
   </script>
 </body>
 </html>
