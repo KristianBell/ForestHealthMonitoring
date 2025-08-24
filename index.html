@@ -7,20 +7,52 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
+    :root {
+      --pad: 10px;
+    }
     body { margin: 0; padding: 0; display: flex; }
     #map { height: 100vh; width: 75%; }
     #sidebar {
-      width: 25%; height: 100vh; overflow-y: auto; padding: 10px; box-sizing: border-box;
-      border-left: 1px solid #ccc; font-family: sans-serif;
+      width: 25%; height: 100vh; overflow-y: auto; padding: var(--pad); box-sizing: border-box;
+      border-left: 1px solid #ccc; font-family: sans-serif; background: #fff;
     }
     h2 { margin-top: 0; }
     canvas { width: 100% !important; height: auto !important; }
     .leaflet-control-layers-expanded { width: auto !important; max-height: none !important; display: block !important; }
     #taxa-filter { width: 100%; margin-bottom: 10px; }
     #download-btn { margin-top: 10px; width: 100%; }
+
+    /* Permanent top-left logo overlay (preserves PNG transparency) */
+    #logo-overlay {
+      position: fixed;
+      top: var(--pad);
+      left: var(--pad);
+      z-index: 1000;        /* above map tiles and markers, below native browser chrome */
+      pointer-events: none; /* don't block map clicks/drags */
+    }
+    #logo-overlay img {
+      display: block;
+      max-width: 220px;     /* adjust as needed */
+      width: 20vw;          /* responsive cap on large screens */
+      height: auto;
+      mix-blend-mode: normal; /* preserve transparency without blending */
+    }
+
+    /* Small screens: stack sidebar under map and keep logo visible */
+    @media (max-width: 900px) {
+      body { flex-direction: column; }
+      #map { width: 100%; height: 60vh; }
+      #sidebar { width: 100%; height: 40vh; }
+      #logo-overlay img { max-width: 180px; width: 40vw; }
+    }
   </style>
 </head>
 <body>
+  <!-- Permanent logo (place ForesthealthLogo.png in repo root) -->
+  <div id="logo-overlay">
+    <img src="ForesthealthLogo.png" alt="Forest Health Monitoring Logo">
+  </div>
+
   <div id="map"></div>
   <div id="sidebar">
     <h2>Site Info</h2>
