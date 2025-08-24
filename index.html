@@ -7,9 +7,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root {
-      --pad: 10px;
-    }
+    :root { --pad: 10px; }
     body { margin: 0; padding: 0; display: flex; }
     #map { height: 100vh; width: 75%; }
     #sidebar {
@@ -22,23 +20,23 @@
     #taxa-filter { width: 100%; margin-bottom: 10px; }
     #download-btn { margin-top: 10px; width: 100%; }
 
-    /* Permanent top-left logo overlay (preserves PNG transparency) */
+    /* Permanent top-left logo overlay */
     #logo-overlay {
       position: fixed;
       top: var(--pad);
       left: var(--pad);
-      z-index: 1000;        /* above map tiles and markers, below native browser chrome */
-      pointer-events: none; /* don't block map clicks/drags */
+      z-index: 1000;
+      pointer-events: none; /* don't block map interaction */
     }
     #logo-overlay img {
       display: block;
-      max-width: 220px;     /* adjust as needed */
-      width: 20vw;          /* responsive cap on large screens */
+      max-width: 220px;
+      width: 20vw;
       height: auto;
-      mix-blend-mode: normal; /* preserve transparency without blending */
+      mix-blend-mode: normal; /* preserve PNG transparency */
     }
 
-    /* Small screens: stack sidebar under map and keep logo visible */
+    /* Small screens */
     @media (max-width: 900px) {
       body { flex-direction: column; }
       #map { width: 100%; height: 60vh; }
@@ -48,7 +46,7 @@
   </style>
 </head>
 <body>
-  <!-- Permanent logo (place ForesthealthLogo.png in repo root) -->
+  <!-- Place ForesthealthLogo.png in the repo root (or adjust src accordingly) -->
   <div id="logo-overlay">
     <img src="ForesthealthLogo.png" alt="Forest Health Monitoring Logo">
   </div>
@@ -87,9 +85,10 @@
     let detections = [];
     let latestSpeciesData = {};
     let filteredDetections = [];
-    let selectedZoneId = null;     // null => "All Zones"
-    let selectedIsBlock = false;   // true => 5-zone block, false => 30-zone site
-    let selectedLayer = null;      // Leaflet layer of selected feature
+
+    // Multi-selection state
+    let selectedLayers = []; // array of Leaflet layers currently selected
+    let selectedZones = [];  // array of { id: string, isBlock: boolean }
 
     // --- Layers (mutually exclusive via base layer control) ---
     const fiveZoneLayer = L.layerGroup();
@@ -106,20 +105,41 @@
     const getHoverStyle = (layer) => (layer._isBlock ? style5Hover : style30Hover);
 
     // --- Selection helpers ---
-    function clearSelection() {
-      if (selectedLayer) selectedLayer.setStyle(getBaseStyle(selectedLayer));
-      selectedLayer = null;
-      selectedZoneId = null;      // no zone selected => "All Zones" mode
-      selectedIsBlock = false;
-      filterDetectionsByTaxa();   // refresh sidebar/charts for totals
+    function isLayerSelected(layer) {
+      return selectedLayers.includes(layer);
+    }
+
+    function addSelection(layer, zoneId, isBlock) {
+      if (!isLayerSelected(layer)) {
+        selectedLayers.push(layer);
+        selectedZones.push({ id: zoneId, isBlock });
+        layer.setStyle(styleSelected);
+      }
+    }
+
+    function removeSelection(layer, zoneId, isBlock) {
+      const idxLayer = selectedLayers.indexOf(layer);
+      if (idxLayer >= 0) selectedLayers.splice(idxLayer, 1);
+
+      const idxZone = selectedZones.findIndex(z => z.id === zoneId && z.isBlock === isBlock);
+      if (idxZone >= 0) selectedZones.splice(idxZone, 1);
+
+      layer.setStyle(getBaseStyle(layer));
+    }
+
+    function clearAllSelections() {
+      selectedLayers.forEach(l => l.setStyle(getBaseStyle(l)));
+      selectedLayers = [];
+      selectedZones = [];
+      filterDetectionsByTaxa(); // refresh to All Zones
     }
 
     // Clear selection if its overlay is turned off (safety for overlay toggles)
     map.on('overlayremove', (e) => {
-      if (!selectedLayer) return;
-      const wasFive = selectedLayer._isBlock;
-      if ((wasFive && e.name === '5 Zones') || (!wasFive && e.name === '30 Zones')) {
-        clearSelection();
+      if (selectedLayers.length === 0) return;
+      const anyFiveSelected = selectedLayers.some(l => l._isBlock);
+      if ((anyFiveSelected && e.name === '5 Zones') || (!anyFiveSelected && e.name === '30 Zones')) {
+        clearAllSelections();
       }
     });
 
@@ -170,15 +190,21 @@
       });
     }
 
-    // Called on click or when filters/selection change
+    // Filter based on taxa and current selection (0 => all zones, 1 => single, >1 => multiple)
     function filterDetectionsByTaxa() {
       const selectedTaxa = document.getElementById('taxa-filter').value;
 
-      // If no zone selected => aggregate across all zones (still respect taxa filter)
       filteredDetections = detections.filter(d => {
-        const matchZone = (selectedZoneId == null)
-          ? true
-          : (selectedIsBlock ? String(d.block) === selectedZoneId : String(d.site) === selectedZoneId);
+        // Zone match
+        let matchZone;
+        if (selectedZones.length === 0) {
+          matchZone = true; // all zones
+        } else {
+          matchZone = selectedZones.some(z =>
+            z.isBlock ? String(d.block) === z.id : String(d.site) === z.id
+          );
+        }
+
         const matchTaxa = (selectedTaxa === 'all') || d.taxa === selectedTaxa;
         return matchZone && matchTaxa;
       });
@@ -203,7 +229,17 @@
       const trendNative = years.map(y => trends[y].native.size);
       const trendNonNative = years.map(y => trends[y].nonnative.size);
 
-      const zoneLabel = (selectedZoneId == null) ? 'All Zones' : selectedZoneId;
+      let zoneLabel;
+      if (selectedZones.length === 0) {
+        zoneLabel = 'All Zones';
+      } else if (selectedZones.length === 1) {
+        zoneLabel = selectedZones[0].id;
+      } else {
+        // Join IDs; trim if very long
+        const ids = selectedZones.map(z => z.id);
+        const joined = ids.join(', ');
+        zoneLabel = joined.length > 60 ? ids.slice(0,5).join(', ') + ` … (+${ids.length-5} more)` : joined;
+      }
 
       document.getElementById('zone-details').innerHTML = `
         <h3>${zoneLabel}</h3>
@@ -214,13 +250,6 @@
 
       updateCharts(nativeSpecies.size, nonNativeSpecies.size, trendNative, trendNonNative, years);
       document.getElementById('species-list').innerHTML = '';
-    }
-
-    function showZoneDetails(feature, isBlock = false) {
-      const props = feature.properties;
-      selectedZoneId = String(isBlock ? props.block : props.site);
-      selectedIsBlock = isBlock;
-      filterDetectionsByTaxa();
     }
 
     // --- Data load (detections & taxa filter) ---
@@ -253,48 +282,60 @@
     // --- Download button ---
     document.getElementById('download-btn').addEventListener('click', () => {
       if (!filteredDetections.length) return;
-      const csvHeader = Object.keys(filteredDetections[0]).join(',');
+      const headerKeys = Object.keys(filteredDetections[0]);
+      const csvHeader = headerKeys.join(',');
       const csvRows = filteredDetections.map(obj =>
-        Object.values(obj).map(v => String(v).replace(/"/g, '""')).join(',')
+        headerKeys.map(k => String(obj[k]).replace(/"/g, '""')).join(',')
       );
       const blob = new Blob([csvHeader + '\n' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      const fname = (selectedZoneId == null ? 'All_Zones' : selectedZoneId) + '_filtered_data.csv';
+      let fname = 'All_Zones_filtered_data.csv';
+      if (selectedZones.length === 1) fname = `${selectedZones[0].id}_filtered_data.csv`;
+      if (selectedZones.length > 1) fname = `Multi_Zones_${selectedZones.length}_filtered_data.csv`;
       a.download = fname;
       a.click();
       URL.revokeObjectURL(url);
     });
 
-    // --- Feature interaction with persistent selection ---
+    // --- Feature interaction with persistent multi-selection ---
     function attachFeatureHandlers(feature, layer, isBlock) {
       layer._isBlock = isBlock;
+      const zoneId = String(isBlock ? feature.properties.block : feature.properties.site);
 
       layer.on('mouseover', () => {
-        if (selectedLayer && layer === selectedLayer) return; // keep selected style
+        if (isLayerSelected(layer)) return; // keep selected style
         layer.setStyle(getHoverStyle(layer));
       });
 
       layer.on('mouseout', () => {
-        if (selectedLayer && layer === selectedLayer) return; // keep selected style
+        if (isLayerSelected(layer)) return; // keep selected style
         layer.setStyle(getBaseStyle(layer));
       });
 
-      layer.on('click', () => {
-        const sameAsSelected = (selectedLayer && layer === selectedLayer);
+      layer.on('click', (e) => {
+        const toggle = e.originalEvent.ctrlKey || e.originalEvent.metaKey;
 
-        if (sameAsSelected) {
-          // Deselect => show totals
-          clearSelection();
-          return;
+        if (toggle) {
+          // Ctrl/Cmd-click toggles this zone
+          if (isLayerSelected(layer)) {
+            removeSelection(layer, zoneId, isBlock);
+          } else {
+            addSelection(layer, zoneId, isBlock);
+          }
+        } else {
+          // Normal click: clear all, select only this one
+          if (isLayerSelected(layer) && selectedLayers.length === 1) {
+            // If it's the only selected, treat as deselect (go to All Zones)
+            clearAllSelections();
+            return;
+          }
+          clearAllSelections();
+          addSelection(layer, zoneId, isBlock);
         }
 
-        // Switch selection
-        if (selectedLayer) selectedLayer.setStyle(getBaseStyle(selectedLayer));
-        selectedLayer = layer;
-        layer.setStyle(styleSelected);
-        showZoneDetails(feature, isBlock);
+        filterDetectionsByTaxa();
       });
     }
 
@@ -329,12 +370,9 @@
     };
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
 
-    // Clear selection when switching between 5 ↔ 30 sets
-    map.on('baselayerchange', (e) => {
-      const newIsBlock = (e.layer === fiveZoneLayer);
-      if (selectedLayer && selectedLayer._isBlock !== newIsBlock) {
-        clearSelection();
-      }
+    // When switching 5 ↔ 30 layers, clear selections (since IDs refer to different dimensions)
+    map.on('baselayerchange', () => {
+      if (selectedLayers.length) clearAllSelections();
     });
   </script>
 </body>
