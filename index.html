@@ -9,7 +9,10 @@
   <style>
     body { margin: 0; padding: 0; display: flex; }
     #map { height: 100vh; width: 75%; }
-    #sidebar { width: 25%; height: 100vh; overflow-y: auto; padding: 10px; box-sizing: border-box; border-left: 1px solid #ccc; font-family: sans-serif; }
+    #sidebar {
+      width: 25%; height: 100vh; overflow-y: auto; padding: 10px; box-sizing: border-box;
+      border-left: 1px solid #ccc; font-family: sans-serif;
+    }
     h2 { margin-top: 0; }
     canvas { width: 100% !important; height: auto !important; }
     .leaflet-control-layers-expanded { width: auto !important; max-height: none !important; display: block !important; }
@@ -24,7 +27,7 @@
     <select id="taxa-filter">
       <option value="all">All Taxa</option>
     </select>
-    <div id="zone-details">Click a zone to see details</div>
+    <div id="zone-details">Loading…</div>
     <canvas id="barChart"></canvas>
     <canvas id="lineChart"></canvas>
     <div id="species-list"></div>
@@ -33,47 +36,62 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    var map = L.map('map').setView([-37.58, 145.2], 12);
+    // --- Map setup ---
+    const map = L.map('map').setView([-37.58, 145.2], 12);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 18,
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    let barChart, lineChart, detections = [], latestSpeciesData = {}, filteredDetections = [];
-    let selectedZoneId = null, selectedIsBlock = false, selectedLayer = null;
-
     const boundaryStyle = { color: 'black', weight: 2, fillOpacity: 0, interactive: false };
     fetch('nillumbik_boundary.geojson')
       .then(res => res.json())
-      .then(data => { L.geoJSON(data, { style: boundaryStyle }).addTo(map); });
+      .then(data => L.geoJSON(data, { style: boundaryStyle }).addTo(map));
 
-    // Layer containers
-    var fiveZoneLayer = L.layerGroup();
-    var thirtyZoneLayer = L.layerGroup();
+    // --- State ---
+    let barChart = null;
+    let lineChart = null;
+    let detections = [];
+    let latestSpeciesData = {};
+    let filteredDetections = [];
+    let selectedZoneId = null;     // null => "All Zones"
+    let selectedIsBlock = false;   // true => 5-zone block, false => 30-zone site
+    let selectedLayer = null;      // Leaflet layer of selected feature
 
-    // ---- Styles ----
-    const style5 = { color: 'darkgreen', weight: 1, fillOpacity: 0.3 };
-    const style5Hover = { color: 'lime', weight: 2 };
-    const style30 = { color: 'blue', weight: 0.5, fillOpacity: 0.2 };
-    const style30Hover = { color: 'cyan', weight: 2 };
-    const styleSelected = { color: '#ff9900', weight: 3, fillOpacity: 0.45 };
+    // --- Layers (mutually exclusive via base layer control) ---
+    const fiveZoneLayer = L.layerGroup();
+    const thirtyZoneLayer = L.layerGroup();
 
-    function getBaseStyle(layer) { return layer._isBlock ? style5 : style30; }
-    function getHoverStyle(layer) { return layer._isBlock ? style5Hover : style30Hover; }
+    // --- Styles ---
+    const style5        = { color: 'darkgreen', weight: 1,   fillOpacity: 0.3 };
+    const style5Hover   = { color: 'lime',      weight: 2 };
+    const style30       = { color: 'blue',      weight: 0.5, fillOpacity: 0.2 };
+    const style30Hover  = { color: 'cyan',      weight: 2 };
+    const styleSelected = { color: '#ff9900',   weight: 3,   fillOpacity: 0.45 };
 
+    const getBaseStyle  = (layer) => (layer._isBlock ? style5 : style30);
+    const getHoverStyle = (layer) => (layer._isBlock ? style5Hover : style30Hover);
+
+    // --- Selection helpers ---
     function clearSelection() {
       if (selectedLayer) selectedLayer.setStyle(getBaseStyle(selectedLayer));
       selectedLayer = null;
-      selectedZoneId = null;
+      selectedZoneId = null;      // no zone selected => "All Zones" mode
       selectedIsBlock = false;
-      // Clear sidebar and charts
-      document.getElementById('zone-details').innerHTML = 'Click a zone to see details';
-      if (barChart) barChart.destroy();
-      if (lineChart) lineChart.destroy();
-      document.getElementById('species-list').innerHTML = '';
+      filterDetectionsByTaxa();   // refresh sidebar/charts for totals
     }
 
+    // Clear selection if its overlay is turned off (safety for overlay toggles)
+    map.on('overlayremove', (e) => {
+      if (!selectedLayer) return;
+      const wasFive = selectedLayer._isBlock;
+      if ((wasFive && e.name === '5 Zones') || (!wasFive && e.name === '30 Zones')) {
+        clearSelection();
+      }
+    });
+
+    // --- Sidebar helpers ---
     function updateSpeciesList(group) {
       const speciesSet = latestSpeciesData[group];
       if (!speciesSet) return;
@@ -120,21 +138,16 @@
       });
     }
 
-    function showZoneDetails(feature, isBlock = false) {
-      const props = feature.properties;
-      const zoneId = String(isBlock ? props.block : props.site);
-      selectedZoneId = zoneId;
-      selectedIsBlock = isBlock;
-      filterDetectionsByTaxa();
-    }
-
+    // Called on click or when filters/selection change
     function filterDetectionsByTaxa() {
-      if (selectedZoneId == null) return;
       const selectedTaxa = document.getElementById('taxa-filter').value;
 
+      // If no zone selected => aggregate across all zones (still respect taxa filter)
       filteredDetections = detections.filter(d => {
-        const matchZone = selectedIsBlock ? String(d.block) === selectedZoneId : String(d.site) === selectedZoneId;
-        const matchTaxa = selectedTaxa === 'all' || d.taxa === selectedTaxa;
+        const matchZone = (selectedZoneId == null)
+          ? true
+          : (selectedIsBlock ? String(d.block) === selectedZoneId : String(d.site) === selectedZoneId);
+        const matchTaxa = (selectedTaxa === 'all') || d.taxa === selectedTaxa;
         return matchZone && matchTaxa;
       });
 
@@ -147,8 +160,9 @@
         const label = `${d.common_name || ''} (${d.name})`;
         const year = d.year;
         if (!trends[year]) trends[year] = { native: new Set(), nonnative: new Set() };
+
         if (isNative) { nativeSpecies.add(label); trends[year].native.add(label); }
-        else { nonNativeSpecies.add(label); trends[year].nonnative.add(label); }
+        else          { nonNativeSpecies.add(label); trends[year].nonnative.add(label); }
       });
 
       latestSpeciesData = { native: nativeSpecies, nonnative: nonNativeSpecies };
@@ -157,8 +171,10 @@
       const trendNative = years.map(y => trends[y].native.size);
       const trendNonNative = years.map(y => trends[y].nonnative.size);
 
+      const zoneLabel = (selectedZoneId == null) ? 'All Zones' : selectedZoneId;
+
       document.getElementById('zone-details').innerHTML = `
-        <h3>${selectedZoneId}</h3>
+        <h3>${zoneLabel}</h3>
         <p><strong>Filtered Detections:</strong> ${filteredDetections.length}</p>
         <p><strong>Unique Native Species:</strong> ${nativeSpecies.size}</p>
         <p><strong>Unique Non-native Species:</strong> ${nonNativeSpecies.size}</p>
@@ -168,9 +184,26 @@
       document.getElementById('species-list').innerHTML = '';
     }
 
-    const blockFiles = ['detections_block_1.json','detections_block_2.json','detections_block_3.json','detections_block_4.json','detections_block_5.json'];
+    function showZoneDetails(feature, isBlock = false) {
+      const props = feature.properties;
+      selectedZoneId = String(isBlock ? props.block : props.site);
+      selectedIsBlock = isBlock;
+      filterDetectionsByTaxa();
+    }
+
+    // --- Data load (detections & taxa filter) ---
+    const blockFiles = [
+      'detections_block_1.json',
+      'detections_block_2.json',
+      'detections_block_3.json',
+      'detections_block_4.json',
+      'detections_block_5.json'
+    ];
+
     Promise.all(blockFiles.map(f => fetch(f).then(res => res.json()))).then(results => {
       detections = results.flat();
+
+      // Populate taxa filter
       const taxaSet = new Set(detections.map(d => d.taxa).filter(Boolean));
       const taxaFilter = document.getElementById('taxa-filter');
       taxaSet.forEach(t => {
@@ -180,38 +213,52 @@
         taxaFilter.appendChild(option);
       });
       taxaFilter.addEventListener('change', filterDetectionsByTaxa);
+
+      // Initial totals view (no zone selected)
+      filterDetectionsByTaxa();
     });
 
+    // --- Download button ---
     document.getElementById('download-btn').addEventListener('click', () => {
       if (!filteredDetections.length) return;
       const csvHeader = Object.keys(filteredDetections[0]).join(',');
-      const csvRows = filteredDetections.map(obj => Object.values(obj).join(','));
+      const csvRows = filteredDetections.map(obj =>
+        Object.values(obj).map(v => String(v).replace(/"/g, '""')).join(',')
+      );
       const blob = new Blob([csvHeader + '\n' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${selectedZoneId}_filtered_data.csv`;
+      const fname = (selectedZoneId == null ? 'All_Zones' : selectedZoneId) + '_filtered_data.csv';
+      a.download = fname;
       a.click();
       URL.revokeObjectURL(url);
     });
 
+    // --- Feature interaction with persistent selection ---
     function attachFeatureHandlers(feature, layer, isBlock) {
       layer._isBlock = isBlock;
 
       layer.on('mouseover', () => {
-        if (selectedLayer && layer === selectedLayer) return;
+        if (selectedLayer && layer === selectedLayer) return; // keep selected style
         layer.setStyle(getHoverStyle(layer));
       });
 
       layer.on('mouseout', () => {
-        if (selectedLayer && layer === selectedLayer) return;
+        if (selectedLayer && layer === selectedLayer) return; // keep selected style
         layer.setStyle(getBaseStyle(layer));
       });
 
       layer.on('click', () => {
-        const sameAsSelected = selectedLayer && layer === selectedLayer;
-        if (sameAsSelected) { clearSelection(); return; }
+        const sameAsSelected = (selectedLayer && layer === selectedLayer);
 
+        if (sameAsSelected) {
+          // Deselect => show totals
+          clearSelection();
+          return;
+        }
+
+        // Switch selection
         if (selectedLayer) selectedLayer.setStyle(getBaseStyle(selectedLayer));
         selectedLayer = layer;
         layer.setStyle(styleSelected);
@@ -219,7 +266,7 @@
       });
     }
 
-    // 5-zone polygons
+    // --- Build 5-zone polygons ---
     fetch('blocks.geojson')
       .then(response => response.json())
       .then(data => {
@@ -228,11 +275,10 @@
           onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, true)
         });
         fiveZoneLayer.addLayer(fiveLayerInstance);
-        // Pre-select 5-zone layer only
-        fiveZoneLayer.addTo(map);
+        fiveZoneLayer.addTo(map);  // Only 5-zone active on load
       });
 
-    // 30-zone polygons
+    // --- Build 30-zone polygons ---
     fetch('nillumbik_30zones.geojson')
       .then(response => response.json())
       .then(data => {
@@ -241,17 +287,17 @@
           onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, false)
         });
         thirtyZoneLayer.addLayer(thirtyLayerInstance);
-        // Do NOT add to map on load (keeps only 5-zone active)
+        // Not added to map on load (keeps only 5-zone active)
       });
 
-    // Put the zone layers in BASE LAYERS to make them exclusive (radio buttons)
+    // --- Base layer control (mutually exclusive radio buttons) ---
     const baseMaps = {
-      "5 Zones": fiveZoneLayer,
-      "30 Zones": thirtyZoneLayer
+      '5 Zones': fiveZoneLayer,
+      '30 Zones': thirtyZoneLayer
     };
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
 
-    // When switching base layer, clear selection if it came from the other set
+    // Clear selection when switching between 5 ↔ 30 sets
     map.on('baselayerchange', (e) => {
       const newIsBlock = (e.layer === fiveZoneLayer);
       if (selectedLayer && selectedLayer._isBlock !== newIsBlock) {
