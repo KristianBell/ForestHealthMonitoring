@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root { --pad: 12px; --green:#2c7a2c; --green-dark:#256025; --chip:#eef3ee; }
+    :root { --pad: 12px; --green:#2c7a2c; --green-dark:#256025; }
     body { margin: 0; padding: 0; display: flex; }
     #map { height: 100vh; width: 75%; }
     #sidebar {
@@ -31,23 +31,18 @@
       border: none; background: var(--green); color: #fff; cursor: pointer;
     }
     #download-btn:hover, .tool-btn:hover { background: var(--green-dark); }
-    #toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 6px; }
+    #toolbar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 8px 0 6px; }
     #filter-note { font-size: 0.92em; color:#444; margin: 6px 0 8px; min-height: 1.1em; }
-
-    /* Summary chips */
-    #chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
-    .chip {
-      background: var(--chip); border: 1px solid #d6e3d6; padding: 6px 8px;
-      border-radius: 999px; font-size: 0.92em; line-height: 1;
-    }
 
     /* Permanent top-left logo */
     #logo-overlay { position: fixed; top: var(--pad); left: var(--pad); z-index: 1000; pointer-events: none; }
     #logo-overlay img { max-width: 220px; width: 20vw; height: auto; display:block; }
 
     /* Splash */
-    #splash-screen { position: fixed; inset: 0; background: rgba(255,255,255,0.97); z-index: 2000;
-      display: flex; align-items: center; justify-content: center; font-family: sans-serif; }
+    #splash-screen {
+      position: fixed; inset: 0; background: rgba(255,255,255,0.97); z-index: 2000;
+      display: flex; align-items: center; justify-content: center; font-family: sans-serif;
+    }
     #splash-content {
       max-width: 700px; text-align: left; padding: 30px; border: 1px solid #ccc; border-radius: 12px; background: #fff;
       box-shadow: 0 4px 10px rgba(0,0,0,0.2);
@@ -110,7 +105,7 @@
         the <strong>Download Data</strong> button at the bottom right.
       </p>
       <p>
-        We’re always looking for ways to improve how we share results. For more information on the program, visit:<br>
+        For more information on the program, visit:<br>
         👉 <a href="https://www.nillumbik.vic.gov.au/Explore/Environment/Environment-projects-and-programs/Forest-Health-Monitoring-Program" target="_blank" rel="noopener">
           Forest Health Monitoring Program
         </a>
@@ -144,13 +139,7 @@
     <div id="toolbar">
       <button id="reset-btn" class="tool-btn" title="Clear all filters and selections">Reset filters</button>
       <button id="zoom-btn" class="tool-btn" title="Zoom map to selected zones">Zoom to selection</button>
-    </div>
-
-    <!-- Summary chips -->
-    <div id="chips">
-      <div class="chip" id="chip-dets">Detections: 0</div>
-      <div class="chip" id="chip-spp">Unique species: 0</div>
-      <div class="chip" id="chip-years">Years: 0</div>
+      <button id="share-btn" class="tool-btn" title="Copy a link to this exact view">Copy link</button>
     </div>
 
     <!-- Details + charts -->
@@ -163,24 +152,28 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // Splash
+    // Hide splash
     document.getElementById('splash-button').addEventListener('click', () => {
       document.getElementById('splash-screen').style.display = 'none';
     });
 
     // Map
-    const map = L.map('map').setView([-37.58, 145.2], 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap contributors' }).addTo(map);
+    const map = L.map('map'); // we'll fit to boundary once it loads
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18, attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
 
     // Boundary (non-interactive)
     const boundaryStyle = { color: 'black', weight: 2, fillOpacity: 0, interactive: false };
-    fetch('nillumbik_boundary.geojson').then(r => r.json()).then(data => L.geoJSON(data, { style: boundaryStyle }).addTo(map));
+    let boundaryBounds = null;
 
     // State
     let barChart=null, lineChart=null;
     let detections=[], latestSpeciesData={}, displayedDetections=[];
     let selectedLayers=[], selectedZones=[]; // [{id,isBlock}]
     let matchZones5 = new Set(), matchZones30 = new Set();
+    let currentBase = '5'; // '5' or '30'
 
     // Layers
     const fiveZoneLayer = L.layerGroup();
@@ -202,9 +195,34 @@
     const taxaFilterEl = document.getElementById('taxa-filter');
     const speciesFilterEl = document.getElementById('species-filter');
     const noteEl = document.getElementById('filter-note');
-    const chipDets = document.getElementById('chip-dets');
-    const chipSpp  = document.getElementById('chip-spp');
-    const chipYears= document.getElementById('chip-years');
+
+    // URL state helpers
+    function parseQuery() {
+      const p = new URLSearchParams(location.search);
+      return {
+        layer: p.get('layer') || '5',
+        taxa: p.get('taxa') || 'all',
+        species: p.get('species') || 'all',
+        sel: (p.get('sel') || '').split('|').filter(Boolean), // IDs
+        view: p.get('view') || '' // "lat,lng,zoom"
+      };
+    }
+    function buildShareURL() {
+      const p = new URLSearchParams();
+      p.set('layer', currentBase);
+      p.set('taxa', taxaFilterEl.value);
+      p.set('species', speciesFilterEl.value);
+      const ids = selectedZones.map(z => z.id);
+      if (ids.length) p.set('sel', ids.join('|'));
+      const c = map.getCenter();
+      p.set('view', `${c.lat.toFixed(5)},${c.lng.toFixed(5)},${map.getZoom()}`);
+      return `${location.origin}${location.pathname}?${p.toString()}`;
+    }
+    async function copyShareURL() {
+      const url = buildShareURL();
+      try { await navigator.clipboard.writeText(url); alert('Link copied to clipboard'); }
+      catch(e){ prompt('Copy this URL', url); }
+    }
 
     // Selection helpers
     function isLayerSelected(layer) { return selectedLayers.includes(layer); }
@@ -255,7 +273,8 @@
         const opt=document.createElement('option'); opt.value=value; opt.textContent=label; speciesFilterEl.appendChild(opt);
       });
       speciesFilterEl.disabled = false;
-      speciesFilterEl.value = 'all';
+      // keep current selection if exists; else default to all
+      if (![...speciesFilterEl.options].some(o=>o.value===speciesFilterEl.value)) speciesFilterEl.value='all';
     }
 
     // Reverse highlight sets
@@ -291,11 +310,9 @@
       computeMatchSets();
       applyMatchStylesToGroup(fiveLayerInstance);
       applyMatchStylesToGroup(thirtyLayerInstance);
-
-      // Update matched zones note
-      if (taxaFilterEl.value === 'all') {
-        noteEl.textContent = '';
-      } else {
+      // Note
+      if (taxaFilterEl.value === 'all') noteEl.textContent = '';
+      else {
         const count30 = matchZones30.size;
         noteEl.textContent = (speciesFilterEl.value === 'all')
           ? `Occurrences in ${count30} of 30 zones`
@@ -333,12 +350,6 @@
           ] },
         options: { responsive: true, plugins: { legend: { position: 'top' } } }
       });
-    }
-
-    function updateChips(totalRows, nativeSet, nonSet, yearsArr) {
-      chipDets.textContent = `Detections: ${totalRows}`;
-      chipSpp.textContent  = `Unique species: ${new Set([...nativeSet, ...nonSet]).size}`;
-      chipYears.textContent= `Years: ${yearsArr.length}`;
     }
 
     function updateDetections() {
@@ -391,7 +402,6 @@
       `;
 
       updateCharts(nativeSpecies.size, nonNativeSpecies.size, trendNative, trendNonNative, years);
-      updateChips(displayedDetections.length, nativeSpecies, nonNativeSpecies, years);
       document.getElementById('species-list').innerHTML = '';
     }
 
@@ -416,7 +426,7 @@
       repopulateSpeciesOptions();
       clearAllSelections();        // also calls updateDetections()
       updateReverseHighlight();
-      map.setView([-37.58, 145.2], 12);
+      if (boundaryBounds) map.fitBounds(boundaryBounds, { padding: [20,20] });
     });
     document.getElementById('zoom-btn').addEventListener('click', () => {
       if (selectedLayers.length === 0) return;
@@ -424,6 +434,7 @@
       selectedLayers.forEach(l => { if (l.getBounds) b.extend(l.getBounds()); });
       if (b.isValid()) map.fitBounds(b, { padding: [20,20] });
     });
+    document.getElementById('share-btn').addEventListener('click', copyShareURL);
 
     // Feature interaction
     function attachFeatureHandlers(feature, layer, isBlock) {
@@ -453,10 +464,11 @@
       });
     }
 
-    // Data + layers loading tracker (for loading overlay)
-    const loaded = { det:false, five:false, thirty:false };
-    function maybeHideLoading() {
-      if (loaded.det && loaded.five && loaded.thirty) {
+    // Data + layers loading tracker
+    const loaded = { det:false, five:false, thirty:false, boundary:false };
+    function maybeFinalizeInit() {
+      if (loaded.det && loaded.five && loaded.thirty && loaded.boundary) {
+        applyURLState(); // initialize from URL, then hide loading
         document.getElementById('loading').style.display = 'none';
       }
     }
@@ -483,7 +495,7 @@
       updateDetections();
       updateReverseHighlight();
 
-      loaded.det = true; maybeHideLoading();
+      loaded.det = true; maybeFinalizeInit();
     });
 
     // 5-zone polygons (active on load)
@@ -493,8 +505,9 @@
       });
       fiveZoneLayer.addLayer(fiveLayerInstance);
       fiveZoneLayer.addTo(map);
+      currentBase = '5';
       updateReverseHighlight();
-      loaded.five = true; maybeHideLoading();
+      loaded.five = true; maybeFinalizeInit();
     });
 
     // 30-zone polygons
@@ -504,16 +517,80 @@
       });
       thirtyZoneLayer.addLayer(thirtyLayerInstance);
       updateReverseHighlight();
-      loaded.thirty = true; maybeHideLoading();
+      loaded.thirty = true; maybeFinalizeInit();
     });
+
+    // Boundary + initial fit (show full Shire on load)
+    fetch('nillumbik_boundary.geojson')
+      .then(r => r.json())
+      .then(data => {
+        const boundaryLayer = L.geoJSON(data, { style: boundaryStyle }).addTo(map);
+        boundaryBounds = boundaryLayer.getBounds();
+        loaded.boundary = true; maybeFinalizeInit();
+      });
 
     // Base layer control (exclusive)
     const baseMaps = { '5 Zones': fiveZoneLayer, '30 Zones': thirtyZoneLayer };
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
-    map.on('baselayerchange', () => {
+    map.on('baselayerchange', (e) => {
+      currentBase = (e.name.includes('30')) ? '30' : '5';
       if (selectedLayers.length) clearAllSelections();
       updateReverseHighlight();
     });
+
+    // Apply URL state after everything is ready
+    function applyURLState() {
+      const qs = parseQuery();
+
+      // Fit to boundary by default; if view is present, use it later
+      if (boundaryBounds) map.fitBounds(boundaryBounds, { padding: [20,20] });
+
+      // Layer
+      if (qs.layer === '30') {
+        if (map.hasLayer(fiveZoneLayer)) { map.removeLayer(fiveZoneLayer); }
+        if (!map.hasLayer(thirtyZoneLayer)) { thirtyZoneLayer.addTo(map); }
+        currentBase = '30';
+      } else {
+        if (map.hasLayer(thirtyZoneLayer)) { map.removeLayer(thirtyZoneLayer); }
+        if (!map.hasLayer(fiveZoneLayer)) { fiveZoneLayer.addTo(map); }
+        currentBase = '5';
+      }
+
+      // Filters
+      if ([...taxaFilterEl.options].some(o=>o.value===qs.taxa)) {
+        taxaFilterEl.value = qs.taxa;
+        repopulateSpeciesOptions();
+        if (qs.species && [...speciesFilterEl.options].some(o=>o.value===qs.species)) {
+          speciesFilterEl.value = qs.species;
+        }
+      }
+      updateDetections();
+      updateReverseHighlight();
+
+      // Selection for the active layer
+      if (qs.sel.length) {
+        const idSet = new Set(qs.sel);
+        const group = (currentBase === '5') ? fiveLayerInstance : thirtyLayerInstance;
+        selectedLayers = []; selectedZones = [];
+        group && group.eachLayer(layer => {
+          const zId = layer._zoneId;
+          if (idSet.has(zId)) {
+            addSelection(layer, zId, layer._isBlock);
+          } else {
+            applyMatchStyleToLayer(layer);
+          }
+        });
+        updateDetections();
+      }
+
+      // Map view override
+      if (qs.view) {
+        const parts = qs.view.split(',').map(Number);
+        if (parts.length === 3 && parts.every(x=>!Number.isNaN(x))) {
+          map.setView([parts[0], parts[1]], parts[2]);
+        }
+      }
+    }
   </script>
 </body>
 </html>
