@@ -150,7 +150,8 @@
 
     <!-- Details + charts -->
     <div id="zone-details">Loading…</div>
-    <canvas id="barChart"></canvas>
+    <!-- Replaced bar chart with radar chart -->
+    <canvas id="radarChart"></canvas>
     <canvas id="lineChart"></canvas>
     <div id="species-list"></div>
     <button id="download-btn">Download Data</button>
@@ -175,7 +176,7 @@
     let boundaryBounds = null;
 
     // State
-    let barChart=null, lineChart=null;
+    let radarChart=null, lineChart=null;
     let detections=[], latestSpeciesData={}, displayedDetections=[];
     let selectedLayers=[], selectedZones=[]; // [{id,isBlock}]
     let matchZones5 = new Set(), matchZones30 = new Set();
@@ -325,7 +326,7 @@
       }
     }
 
-    // Sidebar + charts
+    // Sidebar species list (unchanged behaviour)
     function updateSpeciesList(group) {
       const speciesSet = latestSpeciesData[group];
       if (!speciesSet) return;
@@ -334,25 +335,215 @@
         `<h4>${group === 'native' ? 'Native' : 'Non-native'} Species List</h4><ul>${listHTML}</ul>`;
     }
 
-    function updateCharts(native, nonnative, trendNative, trendNonNative, years) {
-      if (barChart) barChart.destroy();
-      if (lineChart) lineChart.destroy();
+    // ---------- Radar helpers ----------
+    function parseHourFromTimeStr(t) {
+      // Accept "HH", "HH:MM", "HH:MM:SS" (24h) -> 0..23 or null
+      if (!t) return null;
+      const m = String(t).match(/^(\d{1,2})(?::\d{1,2})?(?::\d{1,2})?$/);
+      if (!m) return null;
+      const h = parseInt(m[1], 10);
+      return (Number.isFinite(h) && h >= 0 && h <= 23) ? h : null;
+    }
 
-      barChart = new Chart(document.getElementById('barChart').getContext('2d'), {
-        type: 'bar',
-        data: { labels: ['Native', 'Non-native'],
-          datasets: [{ label: 'Species Richness', data: [native, nonnative], backgroundColor: ['green', 'red'] }] },
-        options: { responsive: true, plugins: { legend: { display: false } },
-          onClick: (e, els) => { if (els.length) updateSpeciesList(els[0].index === 0 ? 'native' : 'nonnative'); } }
+    function computeRadarMetrics(rows) {
+      const n = rows.length || 0;
+      if (n === 0) {
+        return { landPublic:0, forestWet:0, methodAudio:0, timePM:0, nativeProp:0 };
+      }
+      let landPublic = 0, forestWet = 0, methodAudio = 0, timePM = 0, nativeCount = 0;
+      for (const d of rows) {
+        if ((d.land_type || '').toString().toLowerCase() === 'public') landPublic++;
+        if ((d.forest_type || '').toString().toLowerCase() === 'wet')   forestWet++;
+        if ((d.method || '').toString().toLowerCase() === 'audio')      methodAudio++;
+
+        const h = parseHourFromTimeStr(d.time);
+        if (h !== null && h >= 12 && h <= 23) timePM++;
+
+        if ((d.native || '').toString().toLowerCase() === 'native') nativeCount++;
+      }
+      return {
+        landPublic:  landPublic / n,
+        forestWet:   forestWet  / n,
+        methodAudio: methodAudio / n,
+        timePM:      timePM / n,
+        nativeProp:  nativeCount / n
+      };
+    }
+
+    // Plugin: draw min/max endpoint labels on each spoke
+    const spokeEndpointLabels = {
+      id: 'spokeEndpointLabels',
+      afterDraw(chart, args, opts) {
+        if (chart.config.type !== 'radar') return;
+        const { ctx, chartArea, scales: { r } } = chart;
+        const labelsMin = opts.labelsMin || [];
+        const labelsMax = opts.labelsMax || [];
+        const radius = r.drawingArea;
+        const centerX = r.xCenter;
+        const centerY = r.yCenter;
+
+        ctx.save();
+        ctx.font = (opts.font || '12px sans-serif');
+        ctx.fillStyle = (opts.color || '#333');
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const count = r.pointLabels.length;
+        for (let i = 0; i < count; i++) {
+          const angle = r.getIndexAngle(i);
+          const sin = Math.sin(angle);
+          const cos = Math.cos(angle);
+
+          // Inner (min) near centre
+          const rMin = r.getDistanceFromCenterForValue(0) + 12; // small offset
+          const xMin = centerX + (rMin * cos);
+          const yMin = centerY + (rMin * sin);
+          const minText = labelsMin[i] || '';
+          if (minText) ctx.fillText(minText, xMin, yMin);
+
+          // Outer (max) near edge
+          const rMax = r.getDistanceFromCenterForValue(r.max) + 12; // just outside
+          const xMax = centerX + (rMax * cos);
+          const yMax = centerY + (rMax * sin);
+          const maxText = labelsMax[i] || '';
+          if (maxText) ctx.fillText(maxText, xMax, yMax);
+        }
+        ctx.restore();
+      }
+    };
+
+    // Plugin: draw concentric ring labels for years (earliest centre -> latest outside)
+    const yearRingLabels = {
+      id: 'yearRingLabels',
+      afterDraw(chart, args, opts) {
+        if (chart.config.type !== 'radar') return;
+        const { ctx, scales: { r } } = chart;
+        const years = opts.years || [];
+        if (!years.length) return;
+
+        const minYear = Math.min(...years.map(y => +y));
+        const maxYear = Math.max(...years.map(y => +y));
+        if (!Number.isFinite(minYear) || !Number.isFinite(maxYear) || minYear === maxYear) return;
+
+        // Choose up to 5 rings (including centre & outer)
+        const rings = 5;
+        ctx.save();
+        ctx.font = (opts.font || '11px sans-serif');
+        ctx.fillStyle = (opts.color || '#666');
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        for (let i = 0; i <= rings; i++) {
+          const t = i / rings; // 0..1
+          const y = Math.round(minYear + t * (maxYear - minYear));
+          const rr = r.getDistanceFromCenterForValue(t * (r.max - r.min) + r.min);
+          const x = r.xCenter;
+          const yy = r.yCenter - rr; // draw at top
+          ctx.fillText(String(y), x, yy);
+        }
+        ctx.restore();
+      }
+    };
+
+    Chart.register(spokeEndpointLabels, yearRingLabels);
+
+    // Create/update charts
+    function updateCharts(trendNative, trendNonNative, years, radarMetrics) {
+      if (radarChart) radarChart.destroy();
+      if (lineChart)  lineChart.destroy();
+
+      const radarCtx = document.getElementById('radarChart').getContext('2d');
+
+      const labels = [
+        'Land tenure (prop. public)',
+        'Forest type (prop. wet)',
+        'Detection method (prop. audio)',
+        'Time window (12:00–24:00)',
+        'Native (prop.)'
+      ];
+
+      // Endpoint labels for each spoke (min—max)
+      const labelsMin = [
+        'Private',      // land tenure min
+        'Dry',          // forest type min
+        'Camera',       // method min
+        '00:00–12:00',  // time min
+        'Non-native'    // native min
+      ];
+      const labelsMax = [
+        'Public',
+        'Wet',
+        'Audio',
+        '12:00–24:00',
+        'Native'
+      ];
+
+      radarChart = new Chart(radarCtx, {
+        type: 'radar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Selection summary',
+            data: [
+              radarMetrics.landPublic,
+              radarMetrics.forestWet,
+              radarMetrics.methodAudio,
+              radarMetrics.timePM,
+              radarMetrics.nativeProp
+            ],
+            backgroundColor: 'rgba(44, 122, 44, 0.25)',
+            borderColor: 'rgba(44, 122, 44, 1)',
+            borderWidth: 2,
+            pointRadius: 3
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            r: {
+              min: 0, max: 1,
+              ticks: { stepSize: 0.2 },
+              grid: { color: 'rgba(0,0,0,0.1)' },
+              angleLines: { color: 'rgba(0,0,0,0.1)' },
+              pointLabels: { font: { size: 12 } }
+            }
+          },
+          plugins: {
+            legend: { position: 'top' },
+            spokeEndpointLabels: {
+              labelsMin,
+              labelsMax,
+              font: '12px sans-serif',
+              color: '#333'
+            },
+            yearRingLabels: {
+              years,
+              font: '11px sans-serif',
+              color: '#666'
+            },
+            tooltip: {
+              callbacks: {
+                label(ctx) {
+                  const v = ctx.parsed.r;
+                  return `${ctx.label}: ${(v*100).toFixed(0)}%`;
+                }
+              }
+            }
+          }
+        }
       });
 
-      lineChart = new Chart(document.getElementById('lineChart').getContext('2d'), {
+      // Time-series line chart (unchanged)
+      const lineCtx = document.getElementById('lineChart').getContext('2d');
+      lineChart = new Chart(lineCtx, {
         type: 'line',
-        data: { labels: years,
+        data: {
+          labels: years,
           datasets: [
             { label: 'Native Richness', data: trendNative, borderColor: 'green', fill: false },
             { label: 'Non-native Richness', data: trendNonNative, borderColor: 'red', fill: false }
-          ] },
+          ]
+        },
         options: { responsive: true, plugins: { legend: { position: 'top' } } }
       });
     }
@@ -387,9 +578,9 @@
 
       latestSpeciesData = { native: nativeSpecies, nonnative: nonNativeSpecies };
 
-      const years = Object.keys(trends).sort();
-      const trendNative = years.map(y => trends[y].native.size);
-      const trendNonNative = years.map(y => trends[y].nonnative.size);
+      const years = Object.keys(trends).map(Number).sort((a,b)=>a-b);
+      const trendNative = years.map(y => trends[y]?.native.size ?? 0);
+      const trendNonNative = years.map(y => trends[y]?.nonnative.size ?? 0);
 
       let zoneLabel = 'All Zones';
       if (selectedZones.length === 1) zoneLabel = selectedZones[0].id;
@@ -406,7 +597,8 @@
         <p><strong>Unique Non-native Species:</strong> ${nonNativeSpecies.size}</p>
       `;
 
-      updateCharts(nativeSpecies.size, nonNativeSpecies.size, trendNative, trendNonNative, years);
+      const radarMetrics = computeRadarMetrics(displayedDetections);
+      updateCharts(trendNative, trendNonNative, years, radarMetrics);
       document.getElementById('species-list').innerHTML = '';
     }
 
@@ -547,8 +739,6 @@
     // Apply URL state after everything is ready
     function applyURLState() {
       const qs = parseQuery();
-
-      // Fit to boundary by default (already done above)
 
       // Layer
       if (qs.layer === '30') {
