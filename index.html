@@ -19,36 +19,28 @@
     canvas { width: 100% !important; height: auto !important; margin-top: 10px; }
     .leaflet-control-layers-expanded { width: auto !important; max-height: none !important; display: block !important; }
 
-    /* Bigger and cleaner selects + button */
+    /* Prominent selects + button */
     #taxa-filter, #species-filter {
       width: 100%; margin-bottom: 14px;
       font-size: 1.05em; padding: 8px;
-      border-radius: 6px; border: 1px solid #ccc;
-      background: #fff;
+      border-radius: 6px; border: 1px solid #ccc; background: #fff;
     }
     #species-filter:disabled { opacity: 0.6; }
-
     #download-btn {
       margin-top: 14px; width: 100%;
       font-size: 1.05em; padding: 10px;
-      border-radius: 6px; border: none;
-      background: #2c7a2c; color: #fff;
-      cursor: pointer;
+      border-radius: 6px; border: none; background: #2c7a2c; color: #fff; cursor: pointer;
     }
     #download-btn:hover { background: #256025; }
 
     /* Permanent top-left logo */
-    #logo-overlay {
-      position: fixed; top: var(--pad); left: var(--pad);
-      z-index: 1000; pointer-events: none;
-    }
+    #logo-overlay { position: fixed; top: var(--pad); left: var(--pad); z-index: 1000; pointer-events: none; }
     #logo-overlay img { max-width: 220px; width: 20vw; height: auto; display:block; }
 
-    /* Splash screen overlay */
+    /* Splash screen */
     #splash-screen {
-      position: fixed; inset: 0; background: rgba(255,255,255,0.97);
-      z-index: 2000; display: flex; align-items: center; justify-content: center;
-      font-family: sans-serif;
+      position: fixed; inset: 0; background: rgba(255,255,255,0.97); z-index: 2000;
+      display: flex; align-items: center; justify-content: center; font-family: sans-serif;
     }
     #splash-content {
       max-width: 700px; text-align: left; padding: 30px;
@@ -59,8 +51,7 @@
     #splash-content h1 { margin-top: 0; }
     #splash-button {
       margin-top: 20px; padding: 10px 20px; font-size: 16px;
-      cursor: pointer; border-radius: 6px; border: none;
-      background: #2c7a2c; color: #fff;
+      cursor: pointer; border-radius: 6px; border: none; background: #2c7a2c; color: #fff;
     }
     #splash-button:hover { background: #256025; }
 
@@ -68,20 +59,25 @@
     #zone-details { margin-top: 10px; line-height: 1.4; }
     #species-list { margin-top: 12px; }
 
-    /* Make the 5/30 layer toggle bigger */
+    /* --- MAKE LAYER TOGGLE BIGGER (robust) --- */
     .leaflet-control-layers {
-      font-size: 1.05em;
+      font-size: 16px !important;            /* bigger labels */
     }
     .leaflet-control-layers-expanded {
-      padding: 10px 12px;
+      padding: 12px 14px !important;
+    }
+    .leaflet-control-layers-base label,
+    .leaflet-control-layers-overlays label {
+      line-height: 1.6 !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
     }
     .leaflet-control-layers input.leaflet-control-layers-selector {
-      transform: scale(1.25);
-      transform-origin: left center;
-      margin-right: 6px;
-    }
-    .leaflet-control-layers-base label {
-      line-height: 1.6;
+      transform: scale(1.4) !important;      /* bigger radios */
+      transform-origin: left center !important;
+      margin-right: 6px !important;
+      accent-color: #2c7a2c;                 /* clearer checked color (modern browsers) */
     }
 
     @media (max-width: 900px) {
@@ -135,15 +131,12 @@
   <div id="map"></div>
   <div id="sidebar">
     <h2>Zone Info</h2>
-    <!-- Primary taxa filter -->
     <select id="taxa-filter">
       <option value="all">All Taxa</option>
     </select>
-    <!-- Species sub-filter (enabled when a taxa is selected) -->
     <select id="species-filter" disabled>
       <option value="all">All species</option>
     </select>
-
     <div id="zone-details">Loading…</div>
     <canvas id="barChart"></canvas>
     <canvas id="lineChart"></canvas>
@@ -171,7 +164,7 @@
     let detections=[], latestSpeciesData={}, displayedDetections=[];
     let selectedLayers=[], selectedZones=[]; // [{id,isBlock}]
 
-    // For reverse highlight (filter-driven)
+    // Reverse highlight (filter-driven)
     let matchZones5 = new Set();
     let matchZones30 = new Set();
 
@@ -187,13 +180,12 @@
     const style30       = { color: 'blue',      weight: 0.5, fillOpacity: 0.2 };
     const style30Hover  = { color: 'cyan',      weight: 2 };
     const styleSelected = { color: '#ff9900',   weight: 3,   fillOpacity: 0.45 };
-    // highlight zones that MATCH current taxa/species (when user filters)
     const styleMatch    = { color: '#5252ff',   weight: 2.5, fillOpacity: 0.35, dashArray: '3 2' };
 
     const getBaseStyle  = (layer) => (layer._isBlock ? style5 : style30);
     const getHoverStyle = (layer) => (layer._isBlock ? style5Hover : style30Hover);
 
-    // Helpers: selection
+    // Selection helpers
     function isLayerSelected(layer) { return selectedLayers.includes(layer); }
     function addSelection(layer, zoneId, isBlock) {
       if (!isLayerSelected(layer)) {
@@ -207,7 +199,6 @@
       if (li >= 0) selectedLayers.splice(li, 1);
       const zi = selectedZones.findIndex(z => z.id === zoneId && z.isBlock === isBlock);
       if (zi >= 0) selectedZones.splice(zi, 1);
-      // Restore to base or match style
       applyMatchStyleToLayer(layer);
     }
     function clearAllSelections() {
@@ -221,7 +212,6 @@
     const taxaFilterEl = document.getElementById('taxa-filter');
     const speciesFilterEl = document.getElementById('species-filter');
 
-    // Populate species options when taxa changes
     function repopulateSpeciesOptions() {
       const taxa = taxaFilterEl.value;
       speciesFilterEl.innerHTML = '';
@@ -252,12 +242,12 @@
       speciesFilterEl.value = 'all';
     }
 
-    // Compute which zones contain matches for current taxa/species (independent of zone selection)
+    // Compute which zones contain matches (independent of zone click selection)
     function computeMatchSets() {
       matchZones5.clear(); matchZones30.clear();
       const taxa = taxaFilterEl.value;
       const species = speciesFilterEl.value;
-      if (taxa === 'all') return; // no reverse highlight when not filtering by taxa
+      if (taxa === 'all') return;
 
       detections.forEach(d => {
         if (String(d.taxa) !== taxa) return;
@@ -270,16 +260,11 @@
         if (d.site  != null) matchZones30.add(String(d.site));
       });
     }
-
-    // Re-apply styles to reflect match sets + selection
     function applyMatchStylesToGroup(groupInstance) {
       if (!groupInstance) return;
       groupInstance.eachLayer(layer => {
-        if (isLayerSelected(layer)) {
-          layer.setStyle(styleSelected);
-        } else {
-          applyMatchStyleToLayer(layer);
-        }
+        if (isLayerSelected(layer)) layer.setStyle(styleSelected);
+        else applyMatchStyleToLayer(layer);
       });
     }
     function applyMatchStyleToLayer(layer) {
@@ -292,15 +277,13 @@
       applyMatchStylesToGroup(thirtyLayerInstance);
     }
 
-    // Sidebar content + charts
+    // Sidebar + charts
     function updateSpeciesList(group) {
       const speciesSet = latestSpeciesData[group];
       if (!speciesSet) return;
       const listHTML = [...speciesSet].sort().map(s => `<li>${s}</li>`).join('');
-      document.getElementById('species-list').innerHTML = `
-        <h4>${group === 'native' ? 'Native' : 'Non-native'} Species List</h4>
-        <ul>${listHTML}</ul>
-      `;
+      document.getElementById('species-list').innerHTML =
+        `<h4>${group === 'native' ? 'Native' : 'Non-native'} Species List</h4><ul>${listHTML}</ul>`;
     }
 
     function updateCharts(native, nonnative, trendNative, trendNonNative, years) {
@@ -331,15 +314,10 @@
       const selectedSpecies = speciesFilterEl.value;
 
       displayedDetections = detections.filter(d => {
-        // Zone match
         const matchZone = (selectedZones.length === 0)
           ? true
           : selectedZones.some(z => z.isBlock ? String(d.block) === z.id : String(d.site) === z.id);
-
-        // Taxa match
         const matchTaxa = (selectedTaxa === 'all') || String(d.taxa) === selectedTaxa;
-
-        // Species match (only when taxa filter applied)
         let matchSpecies = true;
         if (selectedTaxa !== 'all' && selectedSpecies !== 'all') {
           const nm = String(d.name || '');
@@ -349,10 +327,7 @@
         return matchZone && matchTaxa && matchSpecies;
       });
 
-      const nativeSpecies = new Set();
-      const nonNativeSpecies = new Set();
-      const trends = {};
-
+      const nativeSpecies = new Set(), nonNativeSpecies = new Set(), trends = {};
       displayedDetections.forEach(d => {
         const isNative = (d.native || '').toLowerCase() === 'native';
         const label = `${d.common_name || ''} (${d.name})`;
@@ -363,7 +338,6 @@
       });
 
       latestSpeciesData = { native: nativeSpecies, nonnative: nonNativeSpecies };
-
       const years = Object.keys(trends).sort();
       const trendNative = years.map(y => trends[y].native.size);
       const trendNonNative = years.map(y => trends[y].nonnative.size);
@@ -395,18 +369,15 @@
     Promise.all(blockFiles.map(f => fetch(f).then(r => r.json()))).then(results => {
       detections = results.flat();
 
-      // Populate taxa filter
       const taxaSet = new Set(detections.map(d => d.taxa).filter(Boolean));
       [...taxaSet].sort().forEach(t => {
         const opt = document.createElement('option'); opt.value = t; opt.textContent = t;
         taxaFilterEl.appendChild(opt);
       });
 
-      // Wire filters
       taxaFilterEl.addEventListener('change', () => { repopulateSpeciesOptions(); updateDetections(); updateReverseHighlight(); });
       speciesFilterEl.addEventListener('change', () => { updateDetections(); updateReverseHighlight(); });
 
-      // Initial
       repopulateSpeciesOptions();
       updateDetections();
       updateReverseHighlight();
@@ -427,7 +398,7 @@
       a.download = fname; a.click(); URL.revokeObjectURL(url);
     });
 
-    // Feature interaction (multi-select remains)
+    // Feature interaction
     function attachFeatureHandlers(feature, layer, isBlock) {
       layer._isBlock = isBlock;
       const zoneId = String(isBlock ? feature.properties.block : feature.properties.site);
@@ -436,11 +407,9 @@
       layer.on('mouseover', () => {
         if (!isLayerSelected(layer)) layer.setStyle(getHoverStyle(layer));
       });
-
       layer.on('mouseout', () => {
         if (!isLayerSelected(layer)) applyMatchStyleToLayer(layer);
       });
-
       layer.on('click', (e) => {
         const toggle = e.originalEvent.ctrlKey || e.originalEvent.metaKey;
         if (toggle) {
@@ -454,32 +423,28 @@
       });
     }
 
-    // Build 5-zone polygons (active on load)
+    // 5-zone polygons (active on load)
     fetch('blocks.geojson').then(r => r.json()).then(data => {
       fiveLayerInstance = L.geoJSON(data, {
-        style: style5,
-        onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, true)
+        style: style5, onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, true)
       });
       fiveZoneLayer.addLayer(fiveLayerInstance);
       fiveZoneLayer.addTo(map);
-      updateReverseHighlight(); // apply match styling once loaded
+      updateReverseHighlight();
     });
 
-    // Build 30-zone polygons
+    // 30-zone polygons
     fetch('nillumbik_30zones.geojson').then(r => r.json()).then(data => {
       thirtyLayerInstance = L.geoJSON(data, {
-        style: style30,
-        onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, false)
+        style: style30, onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, false)
       });
       thirtyZoneLayer.addLayer(thirtyLayerInstance);
-      // not added by default
       updateReverseHighlight();
     });
 
     // Base layer control (exclusive)
     const baseMaps = { '5 Zones': fiveZoneLayer, '30 Zones': thirtyZoneLayer };
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
-
     map.on('baselayerchange', () => {
       if (selectedLayers.length) clearAllSelections();
       updateReverseHighlight();
