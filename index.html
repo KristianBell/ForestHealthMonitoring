@@ -42,16 +42,12 @@
       position: fixed; top: var(--pad); left: var(--pad);
       z-index: 1000; pointer-events: none;
     }
-    #logo-overlay img {
-      max-width: 220px; width: 20vw; height: auto; display:block;
-    }
+    #logo-overlay img { max-width: 220px; width: 20vw; height: auto; display:block; }
 
     /* Splash screen overlay */
     #splash-screen {
-      position: fixed; inset: 0;
-      background: rgba(255,255,255,0.97);
-      z-index: 2000;
-      display: flex; align-items: center; justify-content: center;
+      position: fixed; inset: 0; background: rgba(255,255,255,0.97);
+      z-index: 2000; display: flex; align-items: center; justify-content: center;
       font-family: sans-serif;
     }
     #splash-content {
@@ -68,9 +64,25 @@
     }
     #splash-button:hover { background: #256025; }
 
-    /* Small tweaks */
+    /* Sidebar spacing */
     #zone-details { margin-top: 10px; line-height: 1.4; }
     #species-list { margin-top: 12px; }
+
+    /* Make the 5/30 layer toggle bigger */
+    .leaflet-control-layers {
+      font-size: 1.05em;
+    }
+    .leaflet-control-layers-expanded {
+      padding: 10px 12px;
+    }
+    .leaflet-control-layers input.leaflet-control-layers-selector {
+      transform: scale(1.25);
+      transform-origin: left center;
+      margin-right: 6px;
+    }
+    .leaflet-control-layers-base label {
+      line-height: 1.6;
+    }
 
     @media (max-width: 900px) {
       body { flex-direction: column; }
@@ -118,9 +130,7 @@
   </div>
 
   <!-- Permanent logo -->
-  <div id="logo-overlay">
-    <img src="ForesthealthLogo.png" alt="Forest Health Monitoring Logo">
-  </div>
+  <div id="logo-overlay"><img src="ForesthealthLogo.png" alt="Forest Health Monitoring Logo"></div>
 
   <div id="map"></div>
   <div id="sidebar">
@@ -129,7 +139,7 @@
     <select id="taxa-filter">
       <option value="all">All Taxa</option>
     </select>
-    <!-- NEW: Species sub-filter (enabled when a taxa is selected) -->
+    <!-- Species sub-filter (enabled when a taxa is selected) -->
     <select id="species-filter" disabled>
       <option value="all">All species</option>
     </select>
@@ -143,50 +153,47 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // Hide splash screen on button click
+    // Hide splash
     document.getElementById('splash-button').addEventListener('click', () => {
       document.getElementById('splash-screen').style.display = 'none';
     });
 
-    // --- Map setup ---
+    // Map
     const map = L.map('map').setView([-37.58, 145.2], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap contributors' }).addTo(map);
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '© OpenStreetMap contributors'
-    }).addTo(map);
-
+    // Boundary
     const boundaryStyle = { color: 'black', weight: 2, fillOpacity: 0, interactive: false };
-    fetch('nillumbik_boundary.geojson')
-      .then(res => res.json())
-      .then(data => L.geoJSON(data, { style: boundaryStyle }).addTo(map));
+    fetch('nillumbik_boundary.geojson').then(r => r.json()).then(data => L.geoJSON(data, { style: boundaryStyle }).addTo(map));
 
-    // --- State ---
-    let barChart = null;
-    let lineChart = null;
-    let detections = [];
-    let latestSpeciesData = {};
-    let displayedDetections = []; // rows currently shown/used for charts
+    // State
+    let barChart=null, lineChart=null;
+    let detections=[], latestSpeciesData={}, displayedDetections=[];
+    let selectedLayers=[], selectedZones=[]; // [{id,isBlock}]
 
-    // Multi-selection state
-    let selectedLayers = []; // Leaflet layers
-    let selectedZones = [];  // [{ id: string, isBlock: boolean }]
+    // For reverse highlight (filter-driven)
+    let matchZones5 = new Set();
+    let matchZones30 = new Set();
 
-    // --- Layers (mutually exclusive via base layer control) ---
+    // Layers
     const fiveZoneLayer = L.layerGroup();
     const thirtyZoneLayer = L.layerGroup();
+    let fiveLayerInstance = null;
+    let thirtyLayerInstance = null;
 
-    // --- Styles ---
+    // Styles
     const style5        = { color: 'darkgreen', weight: 1,   fillOpacity: 0.3 };
     const style5Hover   = { color: 'lime',      weight: 2 };
     const style30       = { color: 'blue',      weight: 0.5, fillOpacity: 0.2 };
     const style30Hover  = { color: 'cyan',      weight: 2 };
     const styleSelected = { color: '#ff9900',   weight: 3,   fillOpacity: 0.45 };
+    // highlight zones that MATCH current taxa/species (when user filters)
+    const styleMatch    = { color: '#5252ff',   weight: 2.5, fillOpacity: 0.35, dashArray: '3 2' };
 
     const getBaseStyle  = (layer) => (layer._isBlock ? style5 : style30);
     const getHoverStyle = (layer) => (layer._isBlock ? style5Hover : style30Hover);
 
-    // --- Selection helpers ---
+    // Helpers: selection
     function isLayerSelected(layer) { return selectedLayers.includes(layer); }
     function addSelection(layer, zoneId, isBlock) {
       if (!isLayerSelected(layer)) {
@@ -196,20 +203,96 @@
       }
     }
     function removeSelection(layer, zoneId, isBlock) {
-      const idxLayer = selectedLayers.indexOf(layer);
-      if (idxLayer >= 0) selectedLayers.splice(idxLayer, 1);
-      const idxZone = selectedZones.findIndex(z => z.id === zoneId && z.isBlock === isBlock);
-      if (idxZone >= 0) selectedZones.splice(idxZone, 1);
-      layer.setStyle(getBaseStyle(layer));
+      const li = selectedLayers.indexOf(layer);
+      if (li >= 0) selectedLayers.splice(li, 1);
+      const zi = selectedZones.findIndex(z => z.id === zoneId && z.isBlock === isBlock);
+      if (zi >= 0) selectedZones.splice(zi, 1);
+      // Restore to base or match style
+      applyMatchStyleToLayer(layer);
     }
     function clearAllSelections() {
-      selectedLayers.forEach(l => l.setStyle(getBaseStyle(l)));
+      selectedLayers.forEach(l => applyMatchStyleToLayer(l));
       selectedLayers = [];
       selectedZones = [];
-      updateDetections(); // back to All Zones
+      updateDetections();
     }
 
-    // --- Sidebar helpers ---
+    // Filters (DOM)
+    const taxaFilterEl = document.getElementById('taxa-filter');
+    const speciesFilterEl = document.getElementById('species-filter');
+
+    // Populate species options when taxa changes
+    function repopulateSpeciesOptions() {
+      const taxa = taxaFilterEl.value;
+      speciesFilterEl.innerHTML = '';
+      const def = document.createElement('option');
+      def.value = 'all';
+      def.textContent = taxa === 'all' ? 'All species' : `All ${taxa}`;
+      speciesFilterEl.appendChild(def);
+
+      if (taxa === 'all') {
+        speciesFilterEl.disabled = true;
+        speciesFilterEl.value = 'all';
+        return;
+      }
+
+      const seen = new Map();
+      detections.forEach(d => {
+        if (String(d.taxa) !== taxa) return;
+        const key = d.name ? String(d.name) : (d.common_name ? String(d.common_name) : null);
+        if (!key) return;
+        const label = d.common_name ? `${d.common_name} (${d.name || 'n/a'})` : key;
+        if (!seen.has(key)) seen.set(key, label);
+      });
+
+      [...seen.entries()].sort((a,b)=>a[1].localeCompare(b[1])).forEach(([value,label])=>{
+        const opt=document.createElement('option'); opt.value=value; opt.textContent=label; speciesFilterEl.appendChild(opt);
+      });
+      speciesFilterEl.disabled = false;
+      speciesFilterEl.value = 'all';
+    }
+
+    // Compute which zones contain matches for current taxa/species (independent of zone selection)
+    function computeMatchSets() {
+      matchZones5.clear(); matchZones30.clear();
+      const taxa = taxaFilterEl.value;
+      const species = speciesFilterEl.value;
+      if (taxa === 'all') return; // no reverse highlight when not filtering by taxa
+
+      detections.forEach(d => {
+        if (String(d.taxa) !== taxa) return;
+        if (species !== 'all') {
+          const nm = String(d.name || '');
+          const cm = String(d.common_name || '');
+          if (nm !== species && cm !== species) return;
+        }
+        if (d.block != null) matchZones5.add(String(d.block));
+        if (d.site  != null) matchZones30.add(String(d.site));
+      });
+    }
+
+    // Re-apply styles to reflect match sets + selection
+    function applyMatchStylesToGroup(groupInstance) {
+      if (!groupInstance) return;
+      groupInstance.eachLayer(layer => {
+        if (isLayerSelected(layer)) {
+          layer.setStyle(styleSelected);
+        } else {
+          applyMatchStyleToLayer(layer);
+        }
+      });
+    }
+    function applyMatchStyleToLayer(layer) {
+      const matched = layer._isBlock ? matchZones5.has(layer._zoneId) : matchZones30.has(layer._zoneId);
+      layer.setStyle(matched ? styleMatch : getBaseStyle(layer));
+    }
+    function updateReverseHighlight() {
+      computeMatchSets();
+      applyMatchStylesToGroup(fiveLayerInstance);
+      applyMatchStylesToGroup(thirtyLayerInstance);
+    }
+
+    // Sidebar content + charts
     function updateSpeciesList(group) {
       const speciesSet = latestSpeciesData[group];
       if (!speciesSet) return;
@@ -224,101 +307,45 @@
       if (barChart) barChart.destroy();
       if (lineChart) lineChart.destroy();
 
-      const ctxBar = document.getElementById('barChart').getContext('2d');
-      barChart = new Chart(ctxBar, {
+      barChart = new Chart(document.getElementById('barChart').getContext('2d'), {
         type: 'bar',
-        data: {
-          labels: ['Native', 'Non-native'],
-          datasets: [{ label: 'Species Richness', data: [native, nonnative], backgroundColor: ['green', 'red'] }]
-        },
-        options: {
-          responsive: true,
-          plugins: { legend: { display: false } },
-          onClick: (e, elements) => {
-            if (!elements.length) return;
-            const idx = elements[0].index;
-            updateSpeciesList(idx === 0 ? 'native' : 'nonnative');
-          }
-        }
+        data: { labels: ['Native', 'Non-native'],
+          datasets: [{ label: 'Species Richness', data: [native, nonnative], backgroundColor: ['green', 'red'] }] },
+        options: { responsive: true, plugins: { legend: { display: false } },
+          onClick: (e, els) => { if (els.length) updateSpeciesList(els[0].index === 0 ? 'native' : 'nonnative'); } }
       });
 
-      const ctxLine = document.getElementById('lineChart').getContext('2d');
-      lineChart = new Chart(ctxLine, {
+      lineChart = new Chart(document.getElementById('lineChart').getContext('2d'), {
         type: 'line',
-        data: {
-          labels: years,
+        data: { labels: years,
           datasets: [
             { label: 'Native Richness', data: trendNative, borderColor: 'green', fill: false },
             { label: 'Non-native Richness', data: trendNonNative, borderColor: 'red', fill: false }
-          ]
-        },
+          ] },
         options: { responsive: true, plugins: { legend: { position: 'top' } } }
       });
     }
 
-    // --- Species sub-filter population ---
-    const taxaFilterEl = document.getElementById('taxa-filter');
-    const speciesFilterEl = document.getElementById('species-filter');
-
-    function repopulateSpeciesOptions() {
-      const taxa = taxaFilterEl.value;
-
-      // Reset species filter
-      speciesFilterEl.innerHTML = '';
-      const def = document.createElement('option');
-      def.value = 'all';
-      def.textContent = taxa === 'all' ? 'All species' : `All ${taxa}`;
-      speciesFilterEl.appendChild(def);
-
-      if (taxa === 'all') {
-        speciesFilterEl.disabled = true;
-        speciesFilterEl.value = 'all';
-        return;
-      }
-
-      // Unique species for the chosen taxa across the entire dataset
-      const seen = new Map(); // key = value used for filtering; val = label
-      detections.forEach(d => {
-        if (String(d.taxa) !== taxa) return;
-        const key = d.name ? String(d.name) : (d.common_name ? String(d.common_name) : null);
-        if (!key) return;
-        const label = d.common_name ? `${d.common_name} (${d.name || 'n/a'})` : key;
-        if (!seen.has(key)) seen.set(key, label);
-      });
-
-      [...seen.entries()].sort((a,b) => a[1].localeCompare(b[1])).forEach(([value, label]) => {
-        const opt = document.createElement('option');
-        opt.value = value; opt.textContent = label;
-        speciesFilterEl.appendChild(opt);
-      });
-
-      speciesFilterEl.disabled = false;
-      speciesFilterEl.value = 'all';
-    }
-
     function updateDetections() {
       const selectedTaxa = taxaFilterEl.value;
-      const selectedSpecies = speciesFilterEl.value; // 'all' or species key (scientific name if available, else common)
+      const selectedSpecies = speciesFilterEl.value;
 
       displayedDetections = detections.filter(d => {
         // Zone match
         const matchZone = (selectedZones.length === 0)
           ? true
-          : selectedZones.some(z =>
-              z.isBlock ? String(d.block) === z.id : String(d.site) === z.id
-            );
+          : selectedZones.some(z => z.isBlock ? String(d.block) === z.id : String(d.site) === z.id);
 
         // Taxa match
         const matchTaxa = (selectedTaxa === 'all') || String(d.taxa) === selectedTaxa;
 
-        // Species match (only when taxa != all and species != all)
+        // Species match (only when taxa filter applied)
         let matchSpecies = true;
         if (selectedTaxa !== 'all' && selectedSpecies !== 'all') {
-          matchSpecies =
-            String(d.name || '') === selectedSpecies ||
-            String(d.common_name || '') === selectedSpecies;
+          const nm = String(d.name || '');
+          const cm = String(d.common_name || '');
+          matchSpecies = (nm === selectedSpecies || cm === selectedSpecies);
         }
-
         return matchZone && matchTaxa && matchSpecies;
       });
 
@@ -331,8 +358,8 @@
         const label = `${d.common_name || ''} (${d.name})`;
         const year = d.year;
         if (!trends[year]) trends[year] = { native: new Set(), nonnative: new Set() };
-        if (isNative) { nativeSpecies.add(label); trends[year].native.add(label); }
-        else          { nonNativeSpecies.add(label); trends[year].nonnative.add(label); }
+        (isNative ? trends[year].native : trends[year].nonnative).add(label);
+        (isNative ? nativeSpecies : nonNativeSpecies).add(label);
       });
 
       latestSpeciesData = { native: nativeSpecies, nonnative: nonNativeSpecies };
@@ -341,12 +368,9 @@
       const trendNative = years.map(y => trends[y].native.size);
       const trendNonNative = years.map(y => trends[y].nonnative.size);
 
-      let zoneLabel;
-      if (selectedZones.length === 0) {
-        zoneLabel = 'All Zones';
-      } else if (selectedZones.length === 1) {
-        zoneLabel = selectedZones[0].id;
-      } else {
+      let zoneLabel = 'All Zones';
+      if (selectedZones.length === 1) zoneLabel = selectedZones[0].id;
+      if (selectedZones.length > 1) {
         const ids = selectedZones.map(z => z.id);
         const joined = ids.join(', ');
         zoneLabel = joined.length > 60 ? ids.slice(0,5).join(', ') + ` … (+${ids.length-5} more)` : joined;
@@ -363,130 +387,102 @@
       document.getElementById('species-list').innerHTML = '';
     }
 
-    // --- Data load ---
+    // Load detections
     const blockFiles = [
-      'detections_block_1.json',
-      'detections_block_2.json',
-      'detections_block_3.json',
-      'detections_block_4.json',
-      'detections_block_5.json'
+      'detections_block_1.json','detections_block_2.json','detections_block_3.json',
+      'detections_block_4.json','detections_block_5.json'
     ];
-
-    Promise.all(blockFiles.map(f => fetch(f).then(res => res.json()))).then(results => {
+    Promise.all(blockFiles.map(f => fetch(f).then(r => r.json()))).then(results => {
       detections = results.flat();
 
       // Populate taxa filter
       const taxaSet = new Set(detections.map(d => d.taxa).filter(Boolean));
-      const taxaFilter = document.getElementById('taxa-filter');
       [...taxaSet].sort().forEach(t => {
-        const option = document.createElement('option');
-        option.value = t;
-        option.textContent = t;
-        taxaFilter.appendChild(option);
+        const opt = document.createElement('option'); opt.value = t; opt.textContent = t;
+        taxaFilterEl.appendChild(opt);
       });
 
-      // Wire up filters
-      taxaFilterEl.addEventListener('change', () => { repopulateSpeciesOptions(); updateDetections(); });
-      speciesFilterEl.addEventListener('change', updateDetections);
+      // Wire filters
+      taxaFilterEl.addEventListener('change', () => { repopulateSpeciesOptions(); updateDetections(); updateReverseHighlight(); });
+      speciesFilterEl.addEventListener('change', () => { updateDetections(); updateReverseHighlight(); });
 
-      // Initial totals view (no zone selected); species disabled
+      // Initial
       repopulateSpeciesOptions();
       updateDetections();
+      updateReverseHighlight();
     });
 
-    // --- Download button ---
+    // Download
     document.getElementById('download-btn').addEventListener('click', () => {
       if (!displayedDetections.length) return;
-      const headerKeys = Object.keys(displayedDetections[0]);
-      const csvHeader = headerKeys.join(',');
-      const csvRows = displayedDetections.map(obj =>
-        headerKeys.map(k => String(obj[k]).replace(/"/g, '""')).join(',')
-      );
-      const blob = new Blob([csvHeader + '\n' + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const keys = Object.keys(displayedDetections[0]);
+      const header = keys.join(',');
+      const rows = displayedDetections.map(obj => keys.map(k => String(obj[k]).replace(/"/g,'""')).join(','));
+      const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
+      const a = document.createElement('a'); a.href = url;
       let fname = 'All_Zones_data.csv';
       if (selectedZones.length === 1) fname = `${selectedZones[0].id}_data.csv`;
       if (selectedZones.length > 1) fname = `Multi_Zones_${selectedZones.length}_data.csv`;
-      a.download = fname;
-      a.click();
-      URL.revokeObjectURL(url);
+      a.download = fname; a.click(); URL.revokeObjectURL(url);
     });
 
-    // --- Feature interaction with persistent multi-selection ---
+    // Feature interaction (multi-select remains)
     function attachFeatureHandlers(feature, layer, isBlock) {
       layer._isBlock = isBlock;
       const zoneId = String(isBlock ? feature.properties.block : feature.properties.site);
+      layer._zoneId = zoneId;
 
       layer.on('mouseover', () => {
-        if (isLayerSelected(layer)) return;
-        layer.setStyle(getHoverStyle(layer));
+        if (!isLayerSelected(layer)) layer.setStyle(getHoverStyle(layer));
       });
 
       layer.on('mouseout', () => {
-        if (isLayerSelected(layer)) return;
-        layer.setStyle(getBaseStyle(layer));
+        if (!isLayerSelected(layer)) applyMatchStyleToLayer(layer);
       });
 
       layer.on('click', (e) => {
         const toggle = e.originalEvent.ctrlKey || e.originalEvent.metaKey;
-
         if (toggle) {
-          // Ctrl/Cmd-click toggles this zone
-          if (isLayerSelected(layer)) {
-            removeSelection(layer, zoneId, isBlock);
-          } else {
-            addSelection(layer, zoneId, isBlock);
-          }
+          if (isLayerSelected(layer)) removeSelection(layer, zoneId, isBlock);
+          else addSelection(layer, zoneId, isBlock);
         } else {
-          // Normal click: select only this one (or deselect if it was the sole selection)
-          if (isLayerSelected(layer) && selectedLayers.length === 1) {
-            clearAllSelections();
-            return;
-          }
-          clearAllSelections();
-          addSelection(layer, zoneId, isBlock);
+          if (isLayerSelected(layer) && selectedLayers.length === 1) { clearAllSelections(); return; }
+          clearAllSelections(); addSelection(layer, zoneId, isBlock);
         }
-
         updateDetections();
       });
     }
 
-    // --- Build 5-zone polygons ---
-    fetch('blocks.geojson')
-      .then(response => response.json())
-      .then(data => {
-        const fiveLayerInstance = L.geoJSON(data, {
-          style: style5,
-          onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, true)
-        });
-        fiveZoneLayer.addLayer(fiveLayerInstance);
-        fiveZoneLayer.addTo(map);  // Only 5-zone active on load
+    // Build 5-zone polygons (active on load)
+    fetch('blocks.geojson').then(r => r.json()).then(data => {
+      fiveLayerInstance = L.geoJSON(data, {
+        style: style5,
+        onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, true)
       });
+      fiveZoneLayer.addLayer(fiveLayerInstance);
+      fiveZoneLayer.addTo(map);
+      updateReverseHighlight(); // apply match styling once loaded
+    });
 
-    // --- Build 30-zone polygons ---
-    fetch('nillumbik_30zones.geojson')
-      .then(response => response.json())
-      .then(data => {
-        const thirtyLayerInstance = L.geoJSON(data, {
-          style: style30,
-          onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, false)
-        });
-        thirtyZoneLayer.addLayer(thirtyLayerInstance);
-        // Not added to map on load (keeps only 5-zone active)
+    // Build 30-zone polygons
+    fetch('nillumbik_30zones.geojson').then(r => r.json()).then(data => {
+      thirtyLayerInstance = L.geoJSON(data, {
+        style: style30,
+        onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, false)
       });
+      thirtyZoneLayer.addLayer(thirtyLayerInstance);
+      // not added by default
+      updateReverseHighlight();
+    });
 
-    // --- Base layer control (mutually exclusive radio buttons) ---
-    const baseMaps = {
-      '5 Zones': fiveZoneLayer,
-      '30 Zones': thirtyZoneLayer
-    };
+    // Base layer control (exclusive)
+    const baseMaps = { '5 Zones': fiveZoneLayer, '30 Zones': thirtyZoneLayer };
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
 
-    // When switching 5 ↔ 30 layers, clear selections (different zone systems)
     map.on('baselayerchange', () => {
       if (selectedLayers.length) clearAllSelections();
+      updateReverseHighlight();
     });
   </script>
 </body>
