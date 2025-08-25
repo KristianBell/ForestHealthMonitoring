@@ -5,7 +5,7 @@
   <title>Biodiversity Map — Forest Health Monitoring</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root { --pad: 12px; --green:#2c7a2c; --green-dark:#256025; }
     body { margin: 0; padding: 0; display: flex; }
@@ -34,7 +34,7 @@
     #toolbar { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 8px 0 6px; }
     #filter-note { font-size: 0.92em; color:#444; margin: 6px 0 8px; min-height: 1.1em; }
 
-    /* Logo */
+    /* Permanent top-left logo */
     #logo-overlay { position: fixed; top: var(--pad); left: var(--pad); z-index: 1000; pointer-events: none; }
     #logo-overlay img { max-width: 220px; width: 20vw; height: auto; display:block; }
 
@@ -52,7 +52,7 @@
     #splash-button { margin-top: 20px; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 6px; border: none; background: var(--green); color: #fff; }
     #splash-button:hover { background: var(--green-dark); }
 
-    /* Loading */
+    /* Loading overlay */
     #loading { position: fixed; inset: 0; background: rgba(255,255,255,0.85); z-index: 1500; display: flex; align-items: center; justify-content: center; font-family: sans-serif; }
     #loading div { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background:#fff; box-shadow:0 2px 6px rgba(0,0,0,.08); }
 
@@ -60,7 +60,7 @@
     #zone-details { margin-top: 10px; line-height: 1.4; }
     #species-list { margin-top: 12px; }
 
-    /* Bigger 5/30 toggle */
+    /* Bigger 5/30 layer toggle */
     .leaflet-control-layers { font-size: 16px !important; }
     .leaflet-control-layers-expanded { padding: 12px 14px !important; }
     .leaflet-control-layers-base label,
@@ -71,7 +71,7 @@
       transform: scale(1.4) !important; transform-origin: left center !important; margin-right: 6px !important; accent-color: var(--green);
     }
 
-    /* Remove outline on polygons */
+    /* REMOVE rectangular focus outline around clicked polygons */
     .leaflet-container .leaflet-interactive { outline: none !important; }
     .leaflet-container .leaflet-interactive:focus,
     .leaflet-container .leaflet-interactive:focus-visible,
@@ -150,7 +150,7 @@
 
     <!-- Details + charts -->
     <div id="zone-details">Loading…</div>
-    <canvas id="radarChart"></canvas>
+    <canvas id="barChart"></canvas>
     <canvas id="lineChart"></canvas>
     <div id="species-list"></div>
     <button id="download-btn">Download Data</button>
@@ -163,23 +163,23 @@
       document.getElementById('splash-screen').style.display = 'none';
     });
 
-    // Map
+    // Map (fit to boundary once it loads to show full Shire)
     const map = L.map('map');
+
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 18, attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // Boundary
+    // Boundary (non-interactive)
     const boundaryStyle = { color: 'black', weight: 2, fillOpacity: 0, interactive: false };
     let boundaryBounds = null;
 
     // State
-    let radarChart=null, lineChart=null;
+    let barChart=null, lineChart=null;
     let detections=[], latestSpeciesData={}, displayedDetections=[];
     let selectedLayers=[], selectedZones=[]; // [{id,isBlock}]
     let matchZones5 = new Set(), matchZones30 = new Set();
     let currentBase = '5'; // '5' or '30'
-    let allYearsSorted = []; // for fallback year rings
 
     // Layers
     const fiveZoneLayer = L.layerGroup();
@@ -202,15 +202,15 @@
     const speciesFilterEl = document.getElementById('species-filter');
     const noteEl = document.getElementById('filter-note');
 
-    // URL helpers
+    // URL state helpers
     function parseQuery() {
       const p = new URLSearchParams(location.search);
       return {
         layer: p.get('layer') || '5',
         taxa: p.get('taxa') || 'all',
         species: p.get('species') || 'all',
-        sel: (p.get('sel') || '').split('|').filter(Boolean),
-        view: p.get('view') || ''
+        sel: (p.get('sel') || '').split('|').filter(Boolean), // IDs
+        view: p.get('view') || '' // "lat,lng,zoom"
       };
     }
     function buildShareURL() {
@@ -315,6 +315,7 @@
       computeMatchSets();
       applyMatchStylesToGroup(fiveLayerInstance);
       applyMatchStylesToGroup(thirtyLayerInstance);
+      // Note
       if (taxaFilterEl.value === 'all') noteEl.textContent = '';
       else {
         const count30 = matchZones30.size;
@@ -324,7 +325,7 @@
       }
     }
 
-    // Species list
+    // Sidebar + charts
     function updateSpeciesList(group) {
       const speciesSet = latestSpeciesData[group];
       if (!speciesSet) return;
@@ -333,187 +334,26 @@
         `<h4>${group === 'native' ? 'Native' : 'Non-native'} Species List</h4><ul>${listHTML}</ul>`;
     }
 
-    // ---------- Radar helpers ----------
-    function parseHourFromTimeStr(t) {
-      if (!t) return null;
-      const m = String(t).match(/^(\d{1,2})(?::\d{1,2})?(?::\d{1,2})?$/);
-      if (!m) return null;
-      const h = parseInt(m[1], 10);
-      return (Number.isFinite(h) && h >= 0 && h <= 23) ? h : null;
-    }
+    function updateCharts(native, nonnative, trendNative, trendNonNative, years) {
+      if (barChart) barChart.destroy();
+      if (lineChart) lineChart.destroy();
 
-    function computeRadarMetrics(rows) {
-      const n = rows.length || 0;
-      if (n === 0) return { landPublic:0, forestWet:0, methodAudio:0, timePM:0, nativeProp:0 };
-      let landPublic = 0, forestWet = 0, methodAudio = 0, timePM = 0, nativeCount = 0;
-      for (const d of rows) {
-        if ((d.land_type || '').toString().toLowerCase() === 'public') landPublic++;
-        if ((d.forest_type || '').toString().toLowerCase() === 'wet')   forestWet++;
-        if ((d.method || '').toString().toLowerCase() === 'audio')      methodAudio++;
-        const h = parseHourFromTimeStr(d.time);
-        if (h !== null && h >= 12 && h <= 23) timePM++;
-        if ((d.native || '').toString().toLowerCase() === 'native') nativeCount++;
-      }
-      return {
-        landPublic:  landPublic / n,
-        forestWet:   forestWet  / n,
-        methodAudio: methodAudio / n,
-        timePM:      timePM / n,
-        nativeProp:  nativeCount / n
-      };
-    }
-
-    // Plugins: robust, no private props
-    const spokeEndpointLabels = {
-      id: 'spokeEndpointLabels',
-      afterDatasetsDraw(chart, args, opts) {
-        if (chart.config.type !== 'radar') return;
-        const { ctx } = chart;
-        const r = chart._metasets?.[0]?.controller?._cachedMeta?.rScale || chart.scales.r;
-        if (!r) return;
-        const labelsMin = opts.labelsMin || [];
-        const labelsMax = opts.labelsMax || [];
-        const count = chart.config.data.labels.length;
-
-        const centerX = r.xCenter;
-        const centerY = r.yCenter;
-        const maxVal = r.max ?? 1;
-
-        ctx.save();
-        ctx.font = (opts.font || '12px sans-serif');
-        ctx.fillStyle = (opts.color || '#333');
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        for (let i = 0; i < count; i++) {
-          const angle = r.getIndexAngle ? r.getIndexAngle(i) : (i * (Math.PI * 2 / count) - Math.PI / 2);
-          const cos = Math.cos(angle), sin = Math.sin(angle);
-
-          // inner label (min)
-          const rMin = r.getDistanceFromCenterForValue ? r.getDistanceFromCenterForValue(0) : 0;
-          const xMin = centerX + (rMin + 12) * cos;
-          const yMin = centerY + (rMin + 12) * sin;
-          if (labelsMin[i]) ctx.fillText(labelsMin[i], xMin, yMin);
-
-          // outer label (max)
-          const rMax = r.getDistanceFromCenterForValue ? r.getDistanceFromCenterForValue(maxVal) : r.drawingArea;
-          const xMax = centerX + (rMax + 12) * cos;
-          const yMax = centerY + (rMax + 12) * sin;
-          if (labelsMax[i]) ctx.fillText(labelsMax[i], xMax, yMax);
-        }
-        ctx.restore();
-      }
-    };
-
-    const yearRingLabels = {
-      id: 'yearRingLabels',
-      afterDatasetsDraw(chart, args, opts) {
-        if (chart.config.type !== 'radar') return;
-        const { ctx } = chart;
-        const r = chart.scales.r;
-        if (!r) return;
-        const years = (opts.years || []).map(Number).filter(x => Number.isFinite(x));
-        if (years.length < 2) return;
-
-        const minYear = Math.min(...years);
-        const maxYear = Math.max(...years);
-        const rings = 5; // number of labels between centre and edge
-
-        ctx.save();
-        ctx.font = (opts.font || '11px sans-serif');
-        ctx.fillStyle = (opts.color || '#666');
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        for (let i = 0; i <= rings; i++) {
-          const t = i / rings; // 0..1
-          const y = Math.round(minYear + t * (maxYear - minYear));
-          const rr = r.getDistanceFromCenterForValue(t * (r.max - r.min) + r.min);
-          const x = r.xCenter;
-          const yy = r.yCenter - rr; // top
-          ctx.fillText(String(y), x, yy);
-        }
-        ctx.restore();
-      }
-    };
-
-    Chart.register(spokeEndpointLabels, yearRingLabels);
-
-    // Charts
-    function updateCharts(trendNative, trendNonNative, yearsSel, radarMetrics, yearsForRings) {
-      try { if (radarChart) radarChart.destroy(); } catch(e){}
-      try { if (lineChart)  lineChart.destroy(); } catch(e){}
-
-      // Radar
-      const radarCtx = document.getElementById('radarChart').getContext('2d');
-      const labels = [
-        'Land tenure (prop. public)',
-        'Forest type (prop. wet)',
-        'Detection method (prop. audio)',
-        'Time window (12:00–24:00)',
-        'Native (prop.)'
-      ];
-      const labelsMin = ['Private','Dry','Camera','00:00–12:00','Non-native'];
-      const labelsMax = ['Public','Wet','Audio','12:00–24:00','Native'];
-
-      radarChart = new Chart(radarCtx, {
-        type: 'radar',
-        data: {
-          labels,
-          datasets: [{
-            label: 'Selection summary',
-            data: [
-              radarMetrics.landPublic,
-              radarMetrics.forestWet,
-              radarMetrics.methodAudio,
-              radarMetrics.timePM,
-              radarMetrics.nativeProp
-            ],
-            backgroundColor: 'rgba(44, 122, 44, 0.25)',
-            borderColor: 'rgba(44, 122, 44, 1)',
-            borderWidth: 2,
-            pointRadius: 3
-          }]
-        },
-        options: {
-          responsive: true,
-          animation: false,
-          scales: {
-            r: {
-              min: 0, max: 1,
-              ticks: { stepSize: 0.2 },
-              grid: { color: 'rgba(0,0,0,0.1)' },
-              angleLines: { color: 'rgba(0,0,0,0.1)' },
-              pointLabels: { font: { size: 12 } }
-            }
-          },
-          plugins: {
-            legend: { position: 'top' },
-            tooltip: {
-              callbacks: {
-                label(ctx) { return `${ctx.label}: ${(ctx.parsed.r*100).toFixed(0)}%`; }
-              }
-            },
-            // pass options to custom plugins
-            spokeEndpointLabels: { labelsMin, labelsMax, font: '12px sans-serif', color: '#333' },
-            yearRingLabels: { years: yearsForRings, font: '11px sans-serif', color: '#666' }
-          }
-        }
+      barChart = new Chart(document.getElementById('barChart').getContext('2d'), {
+        type: 'bar',
+        data: { labels: ['Native', 'Non-native'],
+          datasets: [{ label: 'Species Richness', data: [native, nonnative], backgroundColor: ['green', 'red'] }] },
+        options: { responsive: true, plugins: { legend: { display: false } },
+          onClick: (e, els) => { if (els.length) updateSpeciesList(els[0].index === 0 ? 'native' : 'nonnative'); } }
       });
 
-      // Line chart
-      const lineCtx = document.getElementById('lineChart').getContext('2d');
-      const labelsLine = yearsSel.length ? yearsSel : allYearsSorted; // show axis even if selection empty
-      lineChart = new Chart(lineCtx, {
+      lineChart = new Chart(document.getElementById('lineChart').getContext('2d'), {
         type: 'line',
-        data: {
-          labels: labelsLine,
+        data: { labels: years,
           datasets: [
-            { label: 'Native Richness', data: trendNative, borderColor: 'green', fill: false, spanGaps: true },
-            { label: 'Non-native Richness', data: trendNonNative, borderColor: 'red', fill: false, spanGaps: true }
-          ]
-        },
-        options: { responsive: true, animation: false, plugins: { legend: { position: 'top' } } }
+            { label: 'Native Richness', data: trendNative, borderColor: 'green', fill: false },
+            { label: 'Non-native Richness', data: trendNonNative, borderColor: 'red', fill: false }
+          ] },
+        options: { responsive: true, plugins: { legend: { position: 'top' } } }
       });
     }
 
@@ -539,19 +379,17 @@
       displayedDetections.forEach(d => {
         const isNative = (d.native || '').toLowerCase() === 'native';
         const label = `${d.common_name || ''} (${d.name})`;
-        const year = Number(d.year);
-        if (Number.isFinite(year)) {
-          if (!trends[year]) trends[year] = { native: new Set(), nonnative: new Set() };
-          (isNative ? trends[year].native : trends[year].nonnative).add(label);
-        }
+        const year = d.year;
+        if (!trends[year]) trends[year] = { native: new Set(), nonnative: new Set() };
+        (isNative ? trends[year].native : trends[year].nonnative).add(label);
         (isNative ? nativeSpecies : nonNativeSpecies).add(label);
       });
 
       latestSpeciesData = { native: nativeSpecies, nonnative: nonNativeSpecies };
 
-      const yearsSel = Object.keys(trends).map(Number).sort((a,b)=>a-b);
-      const trendNative = yearsSel.map(y => trends[y]?.native.size ?? 0);
-      const trendNonNative = yearsSel.map(y => trends[y]?.nonnative.size ?? 0);
+      const years = Object.keys(trends).sort();
+      const trendNative = years.map(y => trends[y].native.size);
+      const trendNonNative = years.map(y => trends[y].nonnative.size);
 
       let zoneLabel = 'All Zones';
       if (selectedZones.length === 1) zoneLabel = selectedZones[0].id;
@@ -568,12 +406,7 @@
         <p><strong>Unique Non-native Species:</strong> ${nonNativeSpecies.size}</p>
       `;
 
-      const radarMetrics = computeRadarMetrics(displayedDetections);
-
-      // Year rings: use selection if >=2 unique years, else fallback to all years
-      const yearsForRings = (yearsSel.length >= 2) ? yearsSel : allYearsSorted;
-
-      updateCharts(trendNative, trendNonNative, yearsSel, radarMetrics, yearsForRings);
+      updateCharts(nativeSpecies.size, nonNativeSpecies.size, trendNative, trendNonNative, years);
       document.getElementById('species-list').innerHTML = '';
     }
 
@@ -592,11 +425,11 @@
       a.download = fname; a.click(); URL.revokeObjectURL(url);
     });
 
-    // Toolbar
+    // Toolbar buttons
     document.getElementById('reset-btn').addEventListener('click', () => {
       taxaFilterEl.value = 'all';
       repopulateSpeciesOptions();
-      clearAllSelections();
+      clearAllSelections();        // also calls updateDetections()
       updateReverseHighlight();
       if (boundaryBounds) map.fitBounds(boundaryBounds, { padding: [20,20] });
     });
@@ -614,10 +447,15 @@
       const zoneId = String(isBlock ? feature.properties.block : feature.properties.site);
       layer._zoneId = zoneId;
 
+      // Tooltip with zone ID
       layer.bindTooltip(zoneId, { sticky: true, direction: 'auto' });
 
-      layer.on('mouseover', () => { if (!isLayerSelected(layer)) layer.setStyle(getHoverStyle(layer)); });
-      layer.on('mouseout', () => { if (!isLayerSelected(layer)) applyMatchStyleToLayer(layer); });
+      layer.on('mouseover', () => {
+        if (!isLayerSelected(layer)) layer.setStyle(getHoverStyle(layer));
+      });
+      layer.on('mouseout', () => {
+        if (!isLayerSelected(layer)) applyMatchStyleToLayer(layer);
+      });
       layer.on('click', (e) => {
         const toggle = e.originalEvent.ctrlKey || e.originalEvent.metaKey;
         if (toggle) {
@@ -631,11 +469,11 @@
       });
     }
 
-    // Loading tracker
+    // Data + layers loading tracker
     const loaded = { det:false, five:false, thirty:false, boundary:false };
     function maybeFinalizeInit() {
       if (loaded.det && loaded.five && loaded.thirty && loaded.boundary) {
-        applyURLState();
+        applyURLState(); // initialize from URL, then hide loading
         document.getElementById('loading').style.display = 'none';
       }
     }
@@ -647,11 +485,6 @@
     ];
     Promise.all(blockFiles.map(f => fetch(f).then(r => r.json()))).then(results => {
       detections = results.flat();
-
-      // all-years fallback vector
-      const yearsSet = new Set();
-      detections.forEach(d => { const y = Number(d.year); if (Number.isFinite(y)) yearsSet.add(y); });
-      allYearsSorted = Array.from(yearsSet).sort((a,b)=>a-b);
 
       // Populate taxa
       const taxaSet = new Set(detections.map(d => d.taxa).filter(Boolean));
@@ -670,7 +503,7 @@
       loaded.det = true; maybeFinalizeInit();
     });
 
-    // 5-zone polygons
+    // 5-zone polygons (active on load)
     fetch('blocks.geojson').then(r => r.json()).then(data => {
       fiveLayerInstance = L.geoJSON(data, {
         style: style5, onEachFeature: (feature, layer) => attachFeatureHandlers(feature, layer, true)
@@ -692,7 +525,7 @@
       loaded.thirty = true; maybeFinalizeInit();
     });
 
-    // Boundary
+    // Boundary + initial fit (show full Shire on load)
     fetch('nillumbik_boundary.geojson')
       .then(r => r.json())
       .then(data => {
@@ -702,7 +535,7 @@
         loaded.boundary = true; maybeFinalizeInit();
       });
 
-    // Base layer control
+    // Base layer control (exclusive)
     const baseMaps = { '5 Zones': fiveZoneLayer, '30 Zones': thirtyZoneLayer };
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
     map.on('baselayerchange', (e) => {
@@ -711,20 +544,24 @@
       updateReverseHighlight();
     });
 
-    // Apply URL state
+    // Apply URL state after everything is ready
     function applyURLState() {
       const qs = parseQuery();
 
+      // Fit to boundary by default (already done above)
+
+      // Layer
       if (qs.layer === '30') {
-        if (map.hasLayer(fiveZoneLayer)) map.removeLayer(fiveZoneLayer);
-        if (!map.hasLayer(thirtyZoneLayer)) thirtyZoneLayer.addTo(map);
+        if (map.hasLayer(fiveZoneLayer)) { map.removeLayer(fiveZoneLayer); }
+        if (!map.hasLayer(thirtyZoneLayer)) { thirtyZoneLayer.addTo(map); }
         currentBase = '30';
       } else {
-        if (map.hasLayer(thirtyZoneLayer)) map.removeLayer(thirtyZoneLayer);
-        if (!map.hasLayer(fiveZoneLayer)) fiveZoneLayer.addTo(map);
+        if (map.hasLayer(thirtyZoneLayer)) { map.removeLayer(thirtyZoneLayer); }
+        if (!map.hasLayer(fiveZoneLayer)) { fiveZoneLayer.addTo(map); }
         currentBase = '5';
       }
 
+      // Filters
       if ([...taxaFilterEl.options].some(o=>o.value===qs.taxa)) {
         taxaFilterEl.value = qs.taxa;
         repopulateSpeciesOptions();
@@ -735,18 +572,23 @@
       updateDetections();
       updateReverseHighlight();
 
+      // Selection for the active layer
       if (qs.sel.length) {
         const idSet = new Set(qs.sel);
         const group = (currentBase === '5') ? fiveLayerInstance : thirtyLayerInstance;
         selectedLayers = []; selectedZones = [];
         group && group.eachLayer(layer => {
           const zId = layer._zoneId;
-          if (idSet.has(zId)) addSelection(layer, zId, layer._isBlock);
-          else applyMatchStyleToLayer(layer);
+          if (idSet.has(zId)) {
+            addSelection(layer, zId, layer._isBlock);
+          } else {
+            applyMatchStyleToLayer(layer);
+          }
         });
         updateDetections();
       }
 
+      // Map view override
       if (qs.view) {
         const parts = qs.view.split(',').map(Number);
         if (parts.length === 3 && parts.every(x=>!Number.isNaN(x))) {
