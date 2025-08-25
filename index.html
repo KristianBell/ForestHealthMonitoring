@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root { --pad: 12px; }
+    :root { --pad: 12px; --green:#2c7a2c; --green-dark:#256025; --chip:#eef3ee; }
     body { margin: 0; padding: 0; display: flex; }
     #map { height: 100vh; width: 75%; }
     #sidebar {
@@ -19,65 +19,61 @@
     canvas { width: 100% !important; height: auto !important; margin-top: 10px; }
     .leaflet-control-layers-expanded { width: auto !important; max-height: none !important; display: block !important; }
 
-    /* Prominent selects + button */
+    /* Controls */
     #taxa-filter, #species-filter {
-      width: 100%; margin-bottom: 14px;
+      width: 100%; margin-bottom: 10px;
       font-size: 1.05em; padding: 8px;
       border-radius: 6px; border: 1px solid #ccc; background: #fff;
     }
     #species-filter:disabled { opacity: 0.6; }
-    #download-btn {
-      margin-top: 14px; width: 100%;
-      font-size: 1.05em; padding: 10px;
-      border-radius: 6px; border: none; background: #2c7a2c; color: #fff; cursor: pointer;
+    #download-btn, .tool-btn {
+      width: 100%; font-size: 1.05em; padding: 10px; border-radius: 6px;
+      border: none; background: var(--green); color: #fff; cursor: pointer;
     }
-    #download-btn:hover { background: #256025; }
+    #download-btn:hover, .tool-btn:hover { background: var(--green-dark); }
+    #toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0 6px; }
+    #filter-note { font-size: 0.92em; color:#444; margin: 6px 0 8px; min-height: 1.1em; }
+
+    /* Summary chips */
+    #chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+    .chip {
+      background: var(--chip); border: 1px solid #d6e3d6; padding: 6px 8px;
+      border-radius: 999px; font-size: 0.92em; line-height: 1;
+    }
 
     /* Permanent top-left logo */
     #logo-overlay { position: fixed; top: var(--pad); left: var(--pad); z-index: 1000; pointer-events: none; }
     #logo-overlay img { max-width: 220px; width: 20vw; height: auto; display:block; }
 
-    /* Splash screen */
-    #splash-screen {
-      position: fixed; inset: 0; background: rgba(255,255,255,0.97); z-index: 2000;
-      display: flex; align-items: center; justify-content: center; font-family: sans-serif;
-    }
+    /* Splash */
+    #splash-screen { position: fixed; inset: 0; background: rgba(255,255,255,0.97); z-index: 2000;
+      display: flex; align-items: center; justify-content: center; font-family: sans-serif; }
     #splash-content {
-      max-width: 700px; text-align: left; padding: 30px;
-      border: 1px solid #ccc; border-radius: 12px; background: #fff;
+      max-width: 700px; text-align: left; padding: 30px; border: 1px solid #ccc; border-radius: 12px; background: #fff;
       box-shadow: 0 4px 10px rgba(0,0,0,0.2);
     }
     #splash-content img { max-width: 200px; margin-bottom: 20px; display:block; }
     #splash-content h1 { margin-top: 0; }
-    #splash-button {
-      margin-top: 20px; padding: 10px 20px; font-size: 16px;
-      cursor: pointer; border-radius: 6px; border: none; background: #2c7a2c; color: #fff;
-    }
-    #splash-button:hover { background: #256025; }
+    #splash-button { margin-top: 20px; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 6px; border: none; background: var(--green); color: #fff; }
+    #splash-button:hover { background: var(--green-dark); }
+
+    /* Loading overlay */
+    #loading { position: fixed; inset: 0; background: rgba(255,255,255,0.85); z-index: 1500; display: flex; align-items: center; justify-content: center; font-family: sans-serif; }
+    #loading div { padding: 10px 14px; border-radius: 8px; border: 1px solid #ddd; background:#fff; box-shadow:0 2px 6px rgba(0,0,0,.08); }
 
     /* Sidebar spacing */
     #zone-details { margin-top: 10px; line-height: 1.4; }
     #species-list { margin-top: 12px; }
 
-    /* --- MAKE LAYER TOGGLE BIGGER (robust) --- */
-    .leaflet-control-layers {
-      font-size: 16px !important;            /* bigger labels */
-    }
-    .leaflet-control-layers-expanded {
-      padding: 12px 14px !important;
-    }
+    /* Bigger 5/30 layer toggle */
+    .leaflet-control-layers { font-size: 16px !important; }
+    .leaflet-control-layers-expanded { padding: 12px 14px !important; }
     .leaflet-control-layers-base label,
     .leaflet-control-layers-overlays label {
-      line-height: 1.6 !important;
-      display: flex !important;
-      align-items: center !important;
-      gap: 8px !important;
+      line-height: 1.6 !important; display: flex !important; align-items: center !important; gap: 8px !important;
     }
     .leaflet-control-layers input.leaflet-control-layers-selector {
-      transform: scale(1.4) !important;      /* bigger radios */
-      transform-origin: left center !important;
-      margin-right: 6px !important;
-      accent-color: #2c7a2c;                 /* clearer checked color (modern browsers) */
+      transform: scale(1.4) !important; transform-origin: left center !important; margin-right: 6px !important; accent-color: var(--green);
     }
 
     @media (max-width: 900px) {
@@ -90,7 +86,7 @@
   </style>
 </head>
 <body>
-  <!-- Splash screen -->
+  <!-- Splash -->
   <div id="splash-screen">
     <div id="splash-content">
       <img src="ForesthealthLogo.png" alt="Forest Health Monitoring Logo">
@@ -114,29 +110,50 @@
         the <strong>Download Data</strong> button at the bottom right.
       </p>
       <p>
-        We’re always looking for ways to improve how we share results and would love your feedback on
-        new features. For more information on the Forest Health Monitoring Program, visit:<br>
+        We’re always looking for ways to improve how we share results. For more information on the program, visit:<br>
         👉 <a href="https://www.nillumbik.vic.gov.au/Explore/Environment/Environment-projects-and-programs/Forest-Health-Monitoring-Program" target="_blank" rel="noopener">
           Forest Health Monitoring Program
         </a>
       </p>
-      <p>Thank you for visiting — and enjoy exploring your local wildlife data!</p>
       <button id="splash-button">Start Exploring</button>
     </div>
   </div>
 
-  <!-- Permanent logo -->
+  <!-- Loading -->
+  <div id="loading"><div>Loading data…</div></div>
+
+  <!-- Logo -->
   <div id="logo-overlay"><img src="ForesthealthLogo.png" alt="Forest Health Monitoring Logo"></div>
 
   <div id="map"></div>
   <div id="sidebar">
     <h2>Zone Info</h2>
+
+    <!-- Filters -->
     <select id="taxa-filter">
       <option value="all">All Taxa</option>
     </select>
     <select id="species-filter" disabled>
       <option value="all">All species</option>
     </select>
+
+    <!-- Matched zones indicator -->
+    <div id="filter-note"></div>
+
+    <!-- Toolbar -->
+    <div id="toolbar">
+      <button id="reset-btn" class="tool-btn" title="Clear all filters and selections">Reset filters</button>
+      <button id="zoom-btn" class="tool-btn" title="Zoom map to selected zones">Zoom to selection</button>
+    </div>
+
+    <!-- Summary chips -->
+    <div id="chips">
+      <div class="chip" id="chip-dets">Detections: 0</div>
+      <div class="chip" id="chip-spp">Unique species: 0</div>
+      <div class="chip" id="chip-years">Years: 0</div>
+    </div>
+
+    <!-- Details + charts -->
     <div id="zone-details">Loading…</div>
     <canvas id="barChart"></canvas>
     <canvas id="lineChart"></canvas>
@@ -146,7 +163,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    // Hide splash
+    // Splash
     document.getElementById('splash-button').addEventListener('click', () => {
       document.getElementById('splash-screen').style.display = 'none';
     });
@@ -155,7 +172,7 @@
     const map = L.map('map').setView([-37.58, 145.2], 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap contributors' }).addTo(map);
 
-    // Boundary
+    // Boundary (non-interactive)
     const boundaryStyle = { color: 'black', weight: 2, fillOpacity: 0, interactive: false };
     fetch('nillumbik_boundary.geojson').then(r => r.json()).then(data => L.geoJSON(data, { style: boundaryStyle }).addTo(map));
 
@@ -163,16 +180,12 @@
     let barChart=null, lineChart=null;
     let detections=[], latestSpeciesData={}, displayedDetections=[];
     let selectedLayers=[], selectedZones=[]; // [{id,isBlock}]
-
-    // Reverse highlight (filter-driven)
-    let matchZones5 = new Set();
-    let matchZones30 = new Set();
+    let matchZones5 = new Set(), matchZones30 = new Set();
 
     // Layers
     const fiveZoneLayer = L.layerGroup();
     const thirtyZoneLayer = L.layerGroup();
-    let fiveLayerInstance = null;
-    let thirtyLayerInstance = null;
+    let fiveLayerInstance = null, thirtyLayerInstance = null;
 
     // Styles
     const style5        = { color: 'darkgreen', weight: 1,   fillOpacity: 0.3 };
@@ -184,6 +197,14 @@
 
     const getBaseStyle  = (layer) => (layer._isBlock ? style5 : style30);
     const getHoverStyle = (layer) => (layer._isBlock ? style5Hover : style30Hover);
+
+    // Elements
+    const taxaFilterEl = document.getElementById('taxa-filter');
+    const speciesFilterEl = document.getElementById('species-filter');
+    const noteEl = document.getElementById('filter-note');
+    const chipDets = document.getElementById('chip-dets');
+    const chipSpp  = document.getElementById('chip-spp');
+    const chipYears= document.getElementById('chip-years');
 
     // Selection helpers
     function isLayerSelected(layer) { return selectedLayers.includes(layer); }
@@ -208,10 +229,7 @@
       updateDetections();
     }
 
-    // Filters (DOM)
-    const taxaFilterEl = document.getElementById('taxa-filter');
-    const speciesFilterEl = document.getElementById('species-filter');
-
+    // Species options
     function repopulateSpeciesOptions() {
       const taxa = taxaFilterEl.value;
       speciesFilterEl.innerHTML = '';
@@ -225,7 +243,6 @@
         speciesFilterEl.value = 'all';
         return;
       }
-
       const seen = new Map();
       detections.forEach(d => {
         if (String(d.taxa) !== taxa) return;
@@ -234,7 +251,6 @@
         const label = d.common_name ? `${d.common_name} (${d.name || 'n/a'})` : key;
         if (!seen.has(key)) seen.set(key, label);
       });
-
       [...seen.entries()].sort((a,b)=>a[1].localeCompare(b[1])).forEach(([value,label])=>{
         const opt=document.createElement('option'); opt.value=value; opt.textContent=label; speciesFilterEl.appendChild(opt);
       });
@@ -242,7 +258,7 @@
       speciesFilterEl.value = 'all';
     }
 
-    // Compute which zones contain matches (independent of zone click selection)
+    // Reverse highlight sets
     function computeMatchSets() {
       matchZones5.clear(); matchZones30.clear();
       const taxa = taxaFilterEl.value;
@@ -260,6 +276,10 @@
         if (d.site  != null) matchZones30.add(String(d.site));
       });
     }
+    function applyMatchStyleToLayer(layer) {
+      const matched = layer._isBlock ? matchZones5.has(layer._zoneId) : matchZones30.has(layer._zoneId);
+      layer.setStyle(matched ? styleMatch : getBaseStyle(layer));
+    }
     function applyMatchStylesToGroup(groupInstance) {
       if (!groupInstance) return;
       groupInstance.eachLayer(layer => {
@@ -267,14 +287,20 @@
         else applyMatchStyleToLayer(layer);
       });
     }
-    function applyMatchStyleToLayer(layer) {
-      const matched = layer._isBlock ? matchZones5.has(layer._zoneId) : matchZones30.has(layer._zoneId);
-      layer.setStyle(matched ? styleMatch : getBaseStyle(layer));
-    }
     function updateReverseHighlight() {
       computeMatchSets();
       applyMatchStylesToGroup(fiveLayerInstance);
       applyMatchStylesToGroup(thirtyLayerInstance);
+
+      // Update matched zones note
+      if (taxaFilterEl.value === 'all') {
+        noteEl.textContent = '';
+      } else {
+        const count30 = matchZones30.size;
+        noteEl.textContent = (speciesFilterEl.value === 'all')
+          ? `Occurrences in ${count30} of 30 zones`
+          : `Selected species occurs in ${count30} of 30 zones`;
+      }
     }
 
     // Sidebar + charts
@@ -309,6 +335,12 @@
       });
     }
 
+    function updateChips(totalRows, nativeSet, nonSet, yearsArr) {
+      chipDets.textContent = `Detections: ${totalRows}`;
+      chipSpp.textContent  = `Unique species: ${new Set([...nativeSet, ...nonSet]).size}`;
+      chipYears.textContent= `Years: ${yearsArr.length}`;
+    }
+
     function updateDetections() {
       const selectedTaxa = taxaFilterEl.value;
       const selectedSpecies = speciesFilterEl.value;
@@ -338,6 +370,7 @@
       });
 
       latestSpeciesData = { native: nativeSpecies, nonnative: nonNativeSpecies };
+
       const years = Object.keys(trends).sort();
       const trendNative = years.map(y => trends[y].native.size);
       const trendNonNative = years.map(y => trends[y].nonnative.size);
@@ -358,30 +391,9 @@
       `;
 
       updateCharts(nativeSpecies.size, nonNativeSpecies.size, trendNative, trendNonNative, years);
+      updateChips(displayedDetections.length, nativeSpecies, nonNativeSpecies, years);
       document.getElementById('species-list').innerHTML = '';
     }
-
-    // Load detections
-    const blockFiles = [
-      'detections_block_1.json','detections_block_2.json','detections_block_3.json',
-      'detections_block_4.json','detections_block_5.json'
-    ];
-    Promise.all(blockFiles.map(f => fetch(f).then(r => r.json()))).then(results => {
-      detections = results.flat();
-
-      const taxaSet = new Set(detections.map(d => d.taxa).filter(Boolean));
-      [...taxaSet].sort().forEach(t => {
-        const opt = document.createElement('option'); opt.value = t; opt.textContent = t;
-        taxaFilterEl.appendChild(opt);
-      });
-
-      taxaFilterEl.addEventListener('change', () => { repopulateSpeciesOptions(); updateDetections(); updateReverseHighlight(); });
-      speciesFilterEl.addEventListener('change', () => { updateDetections(); updateReverseHighlight(); });
-
-      repopulateSpeciesOptions();
-      updateDetections();
-      updateReverseHighlight();
-    });
 
     // Download
     document.getElementById('download-btn').addEventListener('click', () => {
@@ -398,11 +410,29 @@
       a.download = fname; a.click(); URL.revokeObjectURL(url);
     });
 
+    // Toolbar buttons
+    document.getElementById('reset-btn').addEventListener('click', () => {
+      taxaFilterEl.value = 'all';
+      repopulateSpeciesOptions();
+      clearAllSelections();        // also calls updateDetections()
+      updateReverseHighlight();
+      map.setView([-37.58, 145.2], 12);
+    });
+    document.getElementById('zoom-btn').addEventListener('click', () => {
+      if (selectedLayers.length === 0) return;
+      const b = L.latLngBounds();
+      selectedLayers.forEach(l => { if (l.getBounds) b.extend(l.getBounds()); });
+      if (b.isValid()) map.fitBounds(b, { padding: [20,20] });
+    });
+
     // Feature interaction
     function attachFeatureHandlers(feature, layer, isBlock) {
       layer._isBlock = isBlock;
       const zoneId = String(isBlock ? feature.properties.block : feature.properties.site);
       layer._zoneId = zoneId;
+
+      // Tooltip with zone ID
+      layer.bindTooltip(zoneId, { sticky: true, direction: 'auto' });
 
       layer.on('mouseover', () => {
         if (!isLayerSelected(layer)) layer.setStyle(getHoverStyle(layer));
@@ -423,6 +453,39 @@
       });
     }
 
+    // Data + layers loading tracker (for loading overlay)
+    const loaded = { det:false, five:false, thirty:false };
+    function maybeHideLoading() {
+      if (loaded.det && loaded.five && loaded.thirty) {
+        document.getElementById('loading').style.display = 'none';
+      }
+    }
+
+    // Load detections
+    const blockFiles = [
+      'detections_block_1.json','detections_block_2.json','detections_block_3.json',
+      'detections_block_4.json','detections_block_5.json'
+    ];
+    Promise.all(blockFiles.map(f => fetch(f).then(r => r.json()))).then(results => {
+      detections = results.flat();
+
+      // Populate taxa
+      const taxaSet = new Set(detections.map(d => d.taxa).filter(Boolean));
+      [...taxaSet].sort().forEach(t => {
+        const opt = document.createElement('option'); opt.value = t; opt.textContent = t;
+        taxaFilterEl.appendChild(opt);
+      });
+
+      taxaFilterEl.addEventListener('change', () => { repopulateSpeciesOptions(); updateDetections(); updateReverseHighlight(); });
+      speciesFilterEl.addEventListener('change', () => { updateDetections(); updateReverseHighlight(); });
+
+      repopulateSpeciesOptions();
+      updateDetections();
+      updateReverseHighlight();
+
+      loaded.det = true; maybeHideLoading();
+    });
+
     // 5-zone polygons (active on load)
     fetch('blocks.geojson').then(r => r.json()).then(data => {
       fiveLayerInstance = L.geoJSON(data, {
@@ -431,6 +494,7 @@
       fiveZoneLayer.addLayer(fiveLayerInstance);
       fiveZoneLayer.addTo(map);
       updateReverseHighlight();
+      loaded.five = true; maybeHideLoading();
     });
 
     // 30-zone polygons
@@ -440,6 +504,7 @@
       });
       thirtyZoneLayer.addLayer(thirtyLayerInstance);
       updateReverseHighlight();
+      loaded.thirty = true; maybeHideLoading();
     });
 
     // Base layer control (exclusive)
