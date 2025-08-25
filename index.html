@@ -19,13 +19,15 @@
     canvas { width: 100% !important; height: auto !important; margin-top: 10px; }
     .leaflet-control-layers-expanded { width: auto !important; max-height: none !important; display: block !important; }
 
-    /* Bigger and cleaner select + button */
-    #taxa-filter {
+    /* Bigger and cleaner selects + button */
+    #taxa-filter, #species-filter {
       width: 100%; margin-bottom: 14px;
       font-size: 1.05em; padding: 8px;
       border-radius: 6px; border: 1px solid #ccc;
       background: #fff;
     }
+    #species-filter:disabled { opacity: 0.6; }
+
     #download-btn {
       margin-top: 14px; width: 100%;
       font-size: 1.05em; padding: 10px;
@@ -123,9 +125,15 @@
   <div id="map"></div>
   <div id="sidebar">
     <h2>Zone Info</h2>
+    <!-- Primary taxa filter -->
     <select id="taxa-filter">
       <option value="all">All Taxa</option>
     </select>
+    <!-- NEW: Species sub-filter (enabled when a taxa is selected) -->
+    <select id="species-filter" disabled>
+      <option value="all">All species</option>
+    </select>
+
     <div id="zone-details">Loading…</div>
     <canvas id="barChart"></canvas>
     <canvas id="lineChart"></canvas>
@@ -248,22 +256,70 @@
       });
     }
 
+    // --- Species sub-filter population ---
+    const taxaFilterEl = document.getElementById('taxa-filter');
+    const speciesFilterEl = document.getElementById('species-filter');
+
+    function repopulateSpeciesOptions() {
+      const taxa = taxaFilterEl.value;
+
+      // Reset species filter
+      speciesFilterEl.innerHTML = '';
+      const def = document.createElement('option');
+      def.value = 'all';
+      def.textContent = taxa === 'all' ? 'All species' : `All ${taxa}`;
+      speciesFilterEl.appendChild(def);
+
+      if (taxa === 'all') {
+        speciesFilterEl.disabled = true;
+        speciesFilterEl.value = 'all';
+        return;
+      }
+
+      // Unique species for the chosen taxa across the entire dataset
+      const seen = new Map(); // key = value used for filtering; val = label
+      detections.forEach(d => {
+        if (String(d.taxa) !== taxa) return;
+        const key = d.name ? String(d.name) : (d.common_name ? String(d.common_name) : null);
+        if (!key) return;
+        const label = d.common_name ? `${d.common_name} (${d.name || 'n/a'})` : key;
+        if (!seen.has(key)) seen.set(key, label);
+      });
+
+      [...seen.entries()].sort((a,b) => a[1].localeCompare(b[1])).forEach(([value, label]) => {
+        const opt = document.createElement('option');
+        opt.value = value; opt.textContent = label;
+        speciesFilterEl.appendChild(opt);
+      });
+
+      speciesFilterEl.disabled = false;
+      speciesFilterEl.value = 'all';
+    }
+
     function updateDetections() {
-      const selectedTaxa = document.getElementById('taxa-filter').value;
+      const selectedTaxa = taxaFilterEl.value;
+      const selectedSpecies = speciesFilterEl.value; // 'all' or species key (scientific name if available, else common)
 
       displayedDetections = detections.filter(d => {
         // Zone match
-        let matchZone;
-        if (selectedZones.length === 0) {
-          matchZone = true; // all zones
-        } else {
-          matchZone = selectedZones.some(z =>
-            z.isBlock ? String(d.block) === z.id : String(d.site) === z.id
-          );
-        }
+        const matchZone = (selectedZones.length === 0)
+          ? true
+          : selectedZones.some(z =>
+              z.isBlock ? String(d.block) === z.id : String(d.site) === z.id
+            );
+
         // Taxa match
-        const matchTaxa = (selectedTaxa === 'all') || d.taxa === selectedTaxa;
-        return matchZone && matchTaxa;
+        const matchTaxa = (selectedTaxa === 'all') || String(d.taxa) === selectedTaxa;
+
+        // Species match (only when taxa != all and species != all)
+        let matchSpecies = true;
+        if (selectedTaxa !== 'all' && selectedSpecies !== 'all') {
+          matchSpecies =
+            String(d.name || '') === selectedSpecies ||
+            String(d.common_name || '') === selectedSpecies;
+        }
+
+        return matchZone && matchTaxa && matchSpecies;
       });
 
       const nativeSpecies = new Set();
@@ -322,15 +378,19 @@
       // Populate taxa filter
       const taxaSet = new Set(detections.map(d => d.taxa).filter(Boolean));
       const taxaFilter = document.getElementById('taxa-filter');
-      taxaSet.forEach(t => {
+      [...taxaSet].sort().forEach(t => {
         const option = document.createElement('option');
         option.value = t;
         option.textContent = t;
         taxaFilter.appendChild(option);
       });
-      taxaFilter.addEventListener('change', updateDetections);
 
-      // Initial totals view (no zone selected)
+      // Wire up filters
+      taxaFilterEl.addEventListener('change', () => { repopulateSpeciesOptions(); updateDetections(); });
+      speciesFilterEl.addEventListener('change', updateDetections);
+
+      // Initial totals view (no zone selected); species disabled
+      repopulateSpeciesOptions();
       updateDetections();
     });
 
