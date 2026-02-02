@@ -158,6 +158,10 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+// --- helpers ---
+function normSite(x) {
+  return String(x).toUpperCase().replace(/-/g, '');
+}
     // Hide splash
     document.getElementById('splash-button').addEventListener('click', () => {
       document.getElementById('splash-screen').style.display = 'none';
@@ -297,7 +301,7 @@
           if (nm !== species && cm !== species) return;
         }
         if (d.block != null) matchZones5.add(String(d.block));
-        if (d.site  != null) matchZones30.add(String(d.site));
+        if (d.site != null) matchZones30.add(normSite(d.site));
       });
     }
     function applyMatchStyleToLayer(layer) {
@@ -364,7 +368,7 @@
       displayedDetections = detections.filter(d => {
         const matchZone = (selectedZones.length === 0)
           ? true
-          : selectedZones.some(z => z.isBlock ? String(d.block) === z.id : String(d.site) === z.id);
+          : selectedZones.some(z => z.isBlock ? String(d.block) === z.id : normSite(d.site) === normSite(z.id));
         const matchTaxa = (selectedTaxa === 'all') || String(d.taxa) === selectedTaxa;
         let matchSpecies = true;
         if (selectedTaxa !== 'all' && selectedSpecies !== 'all') {
